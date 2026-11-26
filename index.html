@@ -63,6 +63,25 @@ dialog::backdrop{background:#0009}
 #full .mode{font-size:15px;background:var(--soft);border-radius:22px;padding:0 20px;color:var(--fg)}
 #full .mode[aria-pressed=true]{background:var(--acc);color:var(--on);font-weight:700}
 #qlist li{text-align:left}#qlist span{flex:1}
+/* Schede: larghezza in base al testo */
+nav button,#tools button{flex:none;display:inline-flex;align-items:center;justify-content:center;min-height:36px;height:36px;line-height:1}
+body{padding-bottom:calc(100px + env(safe-area-inset-bottom))}
+body::before{content:"";position:fixed;z-index:2;top:0;left:0;right:0;height:env(safe-area-inset-top);background:var(--bg)}
+/* Mini player */
+footer{display:flex;align-items:center;gap:2px;left:max(8px,calc(50% - 292px));right:max(8px,calc(50% - 292px));padding:7px 6px 9px 8px;border-radius:10px;background:#2a2639;color:#fff;transition:background .3s}
+.now{flex:1;min-width:0;gap:10px}
+#mini{width:42px;height:42px;border-radius:6px;font-size:18px}
+footer .txt b{font-size:14px}
+.sub{display:flex;gap:5px;min-width:0;white-space:nowrap}
+footer small{color:#ffffffb3;font-size:12px}
+#by{min-width:0;overflow:hidden;text-overflow:ellipsis}
+#fmt{font-size:12px;color:#7ee2a0}
+#seek,footer #prev,footer #next{display:none}
+footer .row button,#fav{min-width:44px;width:44px;height:44px;font-size:22px}
+#fav{font-size:28px;font-weight:300}
+footer #play{background:none;color:#fff;border-radius:0}
+.bar{position:absolute;left:8px;right:8px;bottom:2px;height:2px;border-radius:2px;background:#ffffff33;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:#fff}
 </style>
 </head>
 <body>
@@ -107,7 +126,9 @@ dialog::backdrop{background:#0009}
 <input id="backup" type="file" hidden>
 
 <footer>
-  <div class="now"><div id="mini" class="cover"></div><div class="txt"><b id="now">Nessun brano in riproduzione</b><small id="by">&nbsp;</small><small id="fmt"></small></div></div>
+  <div class="now"><div id="mini" class="cover"></div><div class="txt"><b id="now">Nessun brano in riproduzione</b><div class="sub"><small id="by"></small><small id="fmt"></small></div></div></div>
+  <button id="fav" aria-label="Aggiungi ai preferiti">+</button>
+  <div class="bar"><i id="bar"></i></div>
   <input id="seek" type="range" min="0" max="1000" value="0" aria-label="Posizione">
   <div class="row">
     <button class="mode" id="shuf" aria-pressed="false">Casuale</button>
@@ -157,6 +178,7 @@ async function create(ids = [], suggested = '') {
   lists.push(l); view = l.id; await save(l);
 }
 function renderTabs() {
+  favIcon();
   const tab = (id, name) => button(name, () => {
     if (id === 'mix') mix = tracks.map(t => [Math.random(), t.id]).sort((a, b) => a[0] - b[0]).slice(0, 25).map(x => x[1]);
     view = id; selected = null; render();
@@ -482,6 +504,8 @@ function showNow() {
   $('fby').textContent = t ? [t.artist, t.album].filter(Boolean).join(', ') : '';
   paint($('art'), t);
   paint($('mini'), t);
+  tint(t);
+  favIcon();
   if (t && 'mediaSession' in navigator)
     navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist, album: t.album || '', artwork: [{ src: t.cover ? covers.get(t.id) : 'icon.png' }] });
   $('qlist').replaceChildren(...queue.map((id, i) => {
@@ -577,11 +601,12 @@ async function showFormat(t) {
   if (!formats.has(t.id)) formats.set(t.id, wrap(store('files').get(t.id)).then(formatOf).catch(() => null));
   const f = await formats.get(t.id);
   if (current?.id !== t.id) return;
-  if (!f) { $('fmt').textContent = $('fq').textContent = 'Formato non rilevato'; return; }
+  if (!f) { $('fmt').textContent = ''; $('fq').textContent = 'Formato non rilevato'; return; }
   const it = n => n.toLocaleString('it-IT');
   const kbps = audio.duration ? `circa ${it(Math.round(t.size * 8 / audio.duration / 1000))} kbps` : '';
   const parts = [f.codec, f.bits ? f.bits + ' bit' : '', f.rate ? it(f.rate / 1000) + ' kHz' : ''].filter(Boolean);
-  $('fmt').textContent = [...parts, f.lossless ? 'lossless' : 'lossy'].join(', ');
+  $('fmt').textContent = '• ' + (f.lossless ? 'Lossless' : f.codec);
+  $('fmt').style.color = f.lossless ? '#7ee2a0' : '#ffffffb3';
   $('fq').textContent = [...parts, f.ch === 1 ? 'mono' : f.ch === 2 ? 'stereo' : f.ch + ' canali', kbps, f.lossless ? 'lossless' : 'lossy'].filter(Boolean).join(', ');
 }
 audio.addEventListener('durationchange', () => showFormat(current));
@@ -638,6 +663,32 @@ $('sleep').onchange = e => { stopAt = e.target.value > 0 ? Date.now() + e.target
 const endSleep = () => { stopAt = 0; $('sleep').value = '0'; audio.pause(); };
 audio.addEventListener('timeupdate', () => { if (stopAt && Date.now() >= stopAt) endSleep(); });
 audio.onended = () => $('sleep').value === 'end' ? endSleep() : next();
+
+// Mini player: preferiti, avanzamento e colore preso dalla copertina
+function favIcon() {
+  const on = !!current && !!lists[0]?.ids.includes(current.id);
+  $('fav').textContent = on ? '✓' : '+';
+  $('fav').setAttribute('aria-pressed', on);
+  $('fav').setAttribute('aria-label', on ? 'Togli dai preferiti' : 'Aggiungi ai preferiti');
+}
+$('fav').onclick = () => {
+  if (!current) return;
+  const l = lists[0], id = current.id;
+  l.ids = l.ids.includes(id) ? l.ids.filter(i => i !== id) : [...l.ids, id];
+  save(l);
+};
+async function tint(t) {
+  const foot = document.querySelector('footer');
+  try {
+    if (!t?.cover) throw 0;
+    const c = document.createElement('canvas').getContext('2d');
+    c.canvas.width = c.canvas.height = 1;
+    c.drawImage(await createImageBitmap(t.cover), 0, 0, 1, 1);
+    const rgb = [...c.getImageData(0, 0, 1, 1).data].slice(0, 3).map(v => Math.round(v * .4 + 8));
+    if (current?.id === t.id) foot.style.background = `rgb(${rgb})`;
+  } catch { foot.style.background = ''; }
+}
+audio.addEventListener('timeupdate', () => { $('bar').style.width = (audio.currentTime / audio.duration * 100 || 0) + '%'; });
 
 // Ripresa dell'ascolto
 let savedAt = 0;
