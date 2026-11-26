@@ -981,23 +981,36 @@ function remember() {
 async function restore() {
   let last;
   try { last = JSON.parse(localStorage.getItem('last')); } catch {}
-  if (!last || !byId(last.id) || current) return;
+  const t = last && byId(last.id);
+  if (!t || current) return;
+  // Il file viene caricato per intero in memoria, così è possibile spostarsi al suo interno
+  const data = await (await wrap(store('files').get(t.id))).arrayBuffer();
+  if (current) return;
+  const ext = t.id.slice(0, -String(t.size).length).split('.').pop().toLowerCase();
+  const type = { flac: 'audio/flac', mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', aac: 'audio/aac' }[ext] || 'audio/aiff';
   context = last.context || []; queue = last.queue || [];
-  await start(byId(last.id), null, last.time);
+  current = t; resumeAt = last.time > 0 ? last.time : null; tries = waited = 0;
+  audio.src = url = URL.createObjectURL(new Blob([data], { type }));
+  render(); showNow(); prepare();
   // Mostra subito il punto salvato, anche prima di premere play
   const part = last.time / last.duration || 0;
   $('bar').style.width = part * 100 + '%';
   $('seek').value = $('fseek').value = part * 1000;
   $('t0').textContent = clock(last.time); $('t1').textContent = clock(last.duration);
 }
-// iPhone può ignorare il salto prima dell'avvio: si ritenta finché la posizione è davvero applicata
+// Su iPhone il salto va fatto solo quando l'audio sta già suonando, senza ripeterlo di continuo
+let tries = 0, waited = 0, lastTry = 0;
 function applyResume() {
-  if (resumeAt === null || !audio.readyState) return;
-  const target = Math.max(0, Math.min(resumeAt, (audio.duration || Infinity) - 1));
-  if (Math.abs(audio.currentTime - target) < 1.5) { if (!audio.paused) resumeAt = null; return; }
+  if (resumeAt === null || audio.paused || audio.seeking || !(audio.currentTime > 0)) return;
+  const target = Math.max(0, Math.min(resumeAt, audio.duration - 1));
+  // Dopo alcuni tentativi si rinuncia, così la barra torna sempre utilizzabile
+  if (!isFinite(target) || Math.abs(audio.currentTime - target) < 3 || tries >= 4 || ++waited > 30) { resumeAt = null; return; }
+  const ranges = audio.seekable;
+  if (!ranges.length || ranges.end(ranges.length - 1) < target || Date.now() - lastTry < 800) return;
+  lastTry = Date.now(); tries++;
   audio.currentTime = target;
 }
-['loadedmetadata', 'canplay', 'playing', 'timeupdate'].forEach(e => audio.addEventListener(e, applyResume));
+audio.addEventListener('timeupdate', applyResume);
 ['seek', 'fseek'].forEach(id => $(id).addEventListener('input', () => { resumeAt = null; }));
 addEventListener('pagehide', () => remember());
 audio.addEventListener('timeupdate', () => {
