@@ -976,7 +976,7 @@ $('hp').onclick = () => $('make').click();
 let savedAt = 0;
 function remember() {
   if (!current || resumeAt !== null) return;
-  try { localStorage.setItem('last', JSON.stringify({ id: current.id, time: audio.currentTime, context, queue })); } catch {}
+  try { localStorage.setItem('last', JSON.stringify({ id: current.id, time: audio.currentTime, duration: audio.duration, context, queue })); } catch {}
 }
 async function restore() {
   let last;
@@ -984,11 +984,25 @@ async function restore() {
   if (!last || !byId(last.id) || current) return;
   context = last.context || []; queue = last.queue || [];
   await start(byId(last.id), null, last.time);
+  // Mostra subito il punto salvato, anche prima di premere play
+  const part = last.time / last.duration || 0;
+  $('bar').style.width = part * 100 + '%';
+  $('seek').value = $('fseek').value = part * 1000;
+  $('t0').textContent = clock(last.time); $('t1').textContent = clock(last.duration);
 }
-audio.addEventListener('loadedmetadata', () => { if (resumeAt !== null) { audio.currentTime = resumeAt; resumeAt = null; } });
+// iPhone può ignorare il salto prima dell'avvio: si ritenta finché la posizione è davvero applicata
+function applyResume() {
+  if (resumeAt === null || !audio.readyState) return;
+  const target = Math.max(0, Math.min(resumeAt, (audio.duration || Infinity) - 1));
+  if (Math.abs(audio.currentTime - target) < 1.5) { if (!audio.paused) resumeAt = null; return; }
+  audio.currentTime = target;
+}
+['loadedmetadata', 'canplay', 'playing', 'timeupdate'].forEach(e => audio.addEventListener(e, applyResume));
+['seek', 'fseek'].forEach(id => $(id).addEventListener('input', () => { resumeAt = null; }));
+addEventListener('pagehide', () => remember());
 audio.addEventListener('timeupdate', () => {
   $('fseek').value = $('seek').value; $('t0').textContent = clock(audio.currentTime); $('t1').textContent = clock(audio.duration);
-  if (Date.now() - savedAt > 5000) { savedAt = Date.now(); remember(); }
+  if (Date.now() - savedAt > 1000) { savedAt = Date.now(); remember(); }
 });
 ['play', 'pause'].forEach(e => audio.addEventListener(e, () => setTimeout(() => { sync(); remember(); })));
 document.addEventListener('visibilitychange', remember);
