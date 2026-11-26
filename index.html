@@ -6,67 +6,83 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Musica">
 <title>Musica</title>
+<meta name="theme-color" content="#f6f5fa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#13111b" media="(prefers-color-scheme: dark)">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon.png">
 <style>
-:root{--bg:#f6f5fb;--fg:#1d1736;--dim:#6a6485;--card:#fff;--acc:#5b3df5;color-scheme:light dark}
-@media(prefers-color-scheme:dark){:root{--bg:#17122b;--fg:#f1eefc;--dim:#a9a2c8;--card:#241d42;--acc:#a592ff}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px ui-rounded,-apple-system,system-ui,sans-serif;padding:env(safe-area-inset-top) 16px calc(215px + env(safe-area-inset-bottom))}
-h1{font-size:34px;margin:20px 0 4px}
-p{color:var(--dim);margin:4px 0 16px}
-button,.btn{font:inherit;border:0;background:none;color:inherit;min-height:44px;cursor:pointer}
-.btn{display:block;background:var(--acc);color:var(--bg);border-radius:12px;padding:12px;text-align:center;font-weight:600}
-input[type=search]{width:100%;font:inherit;padding:12px;margin:12px 0;border:0;border-radius:12px;background:var(--card);color:var(--fg)}
-ul{list-style:none;padding:0;margin:0}
-li{display:flex;align-items:center}
-.song{flex:1;min-width:0;display:flex;gap:12px;align-items:center;text-align:left;padding:6px 0}
-.cover{width:48px;height:48px;flex:none;border-radius:8px;display:grid;place-items:center;color:#fff;font-weight:700;font-size:20px}
+:root{--bg:#f6f5fa;--fg:#201c30;--dim:#66607c;--card:#fff;--soft:#eae7f3;--acc:#5842d4;--on:#fff;color-scheme:light dark}
+@media(prefers-color-scheme:dark){:root{--bg:#13111b;--fg:#ece9f5;--dim:#a39eb8;--card:#1e1b2a;--soft:#2a2639;--acc:#b6a8ff;--on:#17122b}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0 auto;max-width:600px;background:var(--bg);color:var(--fg);font:16px/1.4 ui-rounded,-apple-system,system-ui,sans-serif;padding:env(safe-area-inset-top) 20px calc(210px + env(safe-area-inset-bottom))}
+h1{font-size:34px;margin:24px 0 0}
+p{color:var(--dim);margin:4px 0 16px;font-size:14px}
+button{font:inherit;border:0;background:none;color:inherit;min-height:44px;min-width:44px;cursor:pointer}
+button:active,.btn:active{opacity:.6}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.btn{display:grid;place-items:center;min-height:48px;padding:8px;border-radius:24px;background:var(--acc);color:var(--on);font-weight:600;font-size:15px;text-align:center;cursor:pointer}
+.alt{background:var(--soft);color:var(--fg)}
+.filters{margin-top:16px}
+input[type=search],select{width:100%;font:inherit;min-height:44px;padding:8px 16px;margin-bottom:8px;border:0;border-radius:14px;background:var(--soft);color:var(--fg)}
+#sort{width:auto;background:none;padding:0;color:var(--dim);font-size:14px}
+nav,#tools{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none}
+nav{position:sticky;top:env(safe-area-inset-top);z-index:2;background:var(--bg);padding:10px 0}
+nav button,#tools button{white-space:nowrap;background:var(--soft);border-radius:22px;padding:0 18px;font-size:14px}
+nav button[aria-pressed=true]{background:var(--fg);color:var(--bg);font-weight:600}
+#tools button{background:none;color:var(--acc);padding:0 6px;font-weight:600}
+ul{list-style:none;padding:0;margin:8px 0}
+li{display:flex;align-items:center;gap:4px}
+.song{flex:1;min-width:0;display:flex;gap:14px;align-items:center;text-align:left;padding:8px 0}
+.cover{width:56px;height:56px;flex:none;border-radius:10px;display:grid;place-items:center;color:#fff;font-weight:700;font-size:22px}
 .txt{min-width:0}
 .txt b,.txt small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-small{color:var(--dim)}
+.txt b{font-weight:600}
+small{color:var(--dim);font-size:13px}
 li.on b{color:var(--acc)}
-.del{width:44px;color:var(--dim)}
-footer{position:fixed;left:0;right:0;bottom:0;background:var(--card);padding:12px 16px calc(8px + env(safe-area-inset-bottom));box-shadow:0 -4px 20px #0002}
-#seek{width:100%;accent-color:var(--acc)}
+.del{color:var(--dim);font-size:22px}
+footer{position:fixed;z-index:3;left:max(10px,calc(50% - 290px));right:max(10px,calc(50% - 290px));bottom:calc(8px + env(safe-area-inset-bottom));background:var(--card);border-radius:22px;padding:12px 14px 6px;box-shadow:0 8px 30px #0004}
+.now{display:flex;gap:12px;align-items:center;cursor:pointer}
+#mini{width:52px;height:52px}
+#fmt{font-size:11px}
+input[type=range]{width:100%;accent-color:var(--acc)}
 .row{display:flex;justify-content:space-around;align-items:center}
-.row button{font-size:22px;min-width:56px}
-.row .mode{font-size:14px;color:var(--dim)}
-.row .mode[aria-pressed=true]{color:var(--acc);font-weight:700}
-nav{display:flex;gap:8px;overflow-x:auto;margin-bottom:8px}
-nav button,#tools button{white-space:nowrap;background:var(--card);border-radius:22px;padding:0 16px}
-nav button[aria-pressed=true]{background:var(--acc);color:var(--bg)}
-#tools{display:flex;gap:8px;overflow-x:auto}
-.alt{margin-top:8px;background:var(--card);color:var(--fg)}
-dialog{border:0;border-radius:16px;background:var(--card);color:var(--fg);width:min(90vw,360px);max-height:75vh}
-dialog button{display:block;width:100%;text-align:left}
-#full{width:100%;max-width:100%;height:100%;max-height:100%;margin:0;border-radius:0;background:var(--bg);text-align:center;padding:calc(8px + env(safe-area-inset-top)) 20px calc(20px + env(safe-area-inset-bottom))}
-#fq{margin:6px 0;font-weight:700}
+.row button{font-size:24px;min-width:64px}
+footer .mode{display:none}
+[data-for=play],#play{width:56px;min-width:56px;height:56px;border-radius:50%;background:var(--acc);color:var(--on)}
+dialog{border:0;border-radius:22px;background:var(--card);color:var(--fg);width:min(90vw,380px);max-height:75vh;padding:16px}
+dialog::backdrop{background:#0009}
+#menu button{display:block;width:100%;text-align:left;border-bottom:1px solid var(--soft);padding:10px 4px}
+#menu>b{display:block;margin-bottom:8px}
+#full{width:100%;max-width:100%;height:100%;max-height:100%;margin:0;border-radius:0;background:var(--bg);text-align:center;padding:calc(8px + env(safe-area-inset-top)) 28px calc(24px + env(safe-area-inset-bottom))}
+#close{display:block;color:var(--acc);font-weight:600}
+#art{width:min(100%,42vh);height:auto;aspect-ratio:1;margin:12px auto 24px;font-size:88px;border-radius:20px;box-shadow:0 18px 40px #0005}
 #full>b,#full>small{display:block}
-#art{width:min(100%,40vh);height:auto;aspect-ratio:1;margin:8px auto 16px;font-size:80px}
-#fseek{width:100%;accent-color:var(--acc)}
-#full .row button{width:auto;text-align:center}
-#qlist li{text-align:left}#qlist span{flex:1}#full #qlist button{width:auto}
-footer .txt{cursor:pointer}
-select,#net input{width:100%;font:inherit;padding:10px;margin:0 0 8px;border:0;border-radius:12px;background:var(--card);color:var(--fg)}
-#net{width:100%;max-width:100%;height:100%;max-height:100%;background:var(--bg);padding-top:calc(8px + env(safe-area-inset-top))}
-a{color:var(--acc)}#hits li{justify-content:space-between;gap:8px}#hits button{width:auto}
+#ftitle{font-size:22px}
+#fq{margin:6px 0 18px;font-size:12px}
+#full .row{margin:6px 0 14px}
+#full .mode{font-size:15px;background:var(--soft);border-radius:22px;padding:0 20px;color:var(--fg)}
+#full .mode[aria-pressed=true]{background:var(--acc);color:var(--on);font-weight:700}
+#qlist li{text-align:left}#qlist span{flex:1}
 </style>
 </head>
 <body>
 <h1>Musica</h1>
 <p id="info" role="status"></p>
+<div class="actions">
 <label class="btn">Importa brani
   <input id="pick" type="file" multiple hidden>
 </label>
-<label class="btn alt">Importa come playlist
+<label class="btn alt">Importa playlist
   <input id="pickList" type="file" multiple hidden>
 </label>
+</div>
+<div class="filters">
 <input id="q" type="search" placeholder="Cerca titolo o artista" aria-label="Cerca">
 <select id="sort" aria-label="Ordina per">
   <option value="artist">Ordina per artista</option><option value="title">Ordina per titolo</option>
   <option value="album">Ordina per album</option><option value="added">Aggiunti di recente</option>
 </select>
+</div>
 <nav id="tabs" aria-label="Playlist"></nav>
 <div id="tools"></div>
 <ul id="list"></ul>
@@ -88,17 +104,10 @@ a{color:var(--acc)}#hits li{justify-content:space-between;gap:8px}#hits button{w
   <p>In coda</p><ul id="qlist"></ul>
 </dialog>
 
-<dialog id="net">
-  <button id="netClose">Chiudi</button>
-  <select id="src" aria-label="Fonte"><option value="ia">Internet Archive</option><option value="jam">Jamendo</option></select>
-  <form id="find"><input id="term" type="search" placeholder="Cerca e premi invio" aria-label="Cerca online" required></form>
-  <p id="netInfo" role="status">Solo brani con licenza dichiarata. Controlla le condizioni prima di scaricare.</p>
-  <ul id="hits"></ul>
-</dialog>
 <input id="backup" type="file" hidden>
 
 <footer>
-  <div class="txt"><b id="now">Nessun brano in riproduzione</b><small id="by">&nbsp;</small><small id="fmt"></small></div>
+  <div class="now"><div id="mini" class="cover"></div><div class="txt"><b id="now">Nessun brano in riproduzione</b><small id="by">&nbsp;</small><small id="fmt"></small></div></div>
   <input id="seek" type="range" min="0" max="1000" value="0" aria-label="Posizione">
   <div class="row">
     <button class="mode" id="shuf" aria-pressed="false">Casuale</button>
@@ -472,6 +481,7 @@ function showNow() {
   $('by').textContent = t ? t.artist : '';
   $('fby').textContent = t ? [t.artist, t.album].filter(Boolean).join(', ') : '';
   paint($('art'), t);
+  paint($('mini'), t);
   if (t && 'mediaSession' in navigator)
     navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist, album: t.album || '', artwork: [{ src: t.cover ? covers.get(t.id) : 'icon.png' }] });
   $('qlist').replaceChildren(...queue.map((id, i) => {
@@ -494,7 +504,7 @@ function sync() {
   });
 }
 document.querySelectorAll('[data-for]').forEach(b => b.onclick = () => { $(b.dataset.for).click(); sync(); });
-document.querySelector('footer .txt').onclick = () => { showNow(); $('full').showModal(); };
+document.querySelector('.now').onclick = () => { showNow(); $('full').showModal(); };
 $('close').onclick = () => $('full').close();
 $('fseek').oninput = $('seek').oninput;
 const clock = s => isFinite(s) ? `${s / 60 | 0}:${String(s % 60 | 0).padStart(2, '0')}` : '0:00';
@@ -598,7 +608,7 @@ $('sort').onchange = () => { render(); };
 
 // Backup di playlist e dati (senza audio)
 function more() {
-  sheet(['Cerca musica online', () => $('net').showModal()], ['Esporta backup', exportData], ['Ripristina backup', () => $('backup').click()]);
+  sheet(['Esporta backup', exportData], ['Ripristina backup', () => $('backup').click()]);
 }
 async function exportData() {
   const data = JSON.stringify({ app: 'musica', lists, tracks: tracks.map(({ cover, tagged, ...t }) => t) });
@@ -629,78 +639,6 @@ const endSleep = () => { stopAt = 0; $('sleep').value = '0'; audio.pause(); };
 audio.addEventListener('timeupdate', () => { if (stopAt && Date.now() >= stopAt) endSleep(); });
 audio.onended = () => $('sleep').value === 'end' ? endSleep() : next();
 
-// Ricerca online
-const getJSON = async u => { const r = await fetch(u); if (!r.ok) throw 0; return r.json(); };
-function hit(label, action, link) {
-  const li = document.createElement('li'), name = document.createElement('span');
-  name.textContent = label; li.append(name);
-  if (link) {
-    const a = document.createElement('a');
-    a.href = link; a.target = '_blank'; a.textContent = 'Licenza';
-    li.append(a);
-  }
-  li.append(action); $('hits').append(li);
-}
-async function download(b, url, artist, title, source) {
-  b.disabled = true; b.textContent = 'Scarico';
-  try {
-    const r = await fetch(url);
-    if (!r.ok) throw 0;
-    const blob = await r.blob();
-    const clean = x => String(x).replace(/[\\/:]/g, ' ').replace(/ - /g, ' ').trim();
-    const file = new File([blob], `${clean(artist)} - ${clean(title)}.flac`);
-    await importFiles({ files: [file] }, false);
-    const t = byId(file.name + file.size);
-    if (!t) throw 0;
-    t.source = source; await wrap(store('tracks', 'readwrite').put(t));
-    b.textContent = 'Salvato';
-  } catch {
-    b.disabled = false; b.textContent = 'Riprova';
-    $('netInfo').textContent = 'Download non riuscito. Puoi scaricare il file dal sito con Safari e poi importarlo.';
-  }
-}
-const getButton = (...args) => { const b = button('Scarica', () => download(b, ...args)); return b; };
-async function openItem(d) {
-  $('hits').replaceChildren(); $('netInfo').textContent = 'Carico i brani';
-  try {
-    const data = await getJSON('https://archive.org/metadata/' + encodeURIComponent(d.identifier));
-    const files = data.files.filter(f => /\.flac$/i.test(f.name) && f.private !== 'true');
-    $('netInfo').textContent = files.length ? 'File FLAC disponibili' : 'Nessun file FLAC scaricabile';
-    files.forEach(f => {
-      const title = f.title || f.name.split('/').pop().replace(/\.flac$/i, '');
-      const path = f.name.split('/').map(encodeURIComponent).join('/');
-      hit(title, getButton(`https://archive.org/cors/${d.identifier}/${path}`, f.artist || [d.creator].flat()[0] || 'Artista sconosciuto', title, 'https://archive.org/details/' + d.identifier), d.licenseurl);
-    });
-  } catch { $('netInfo').textContent = 'Impossibile caricare. Controlla la connessione.'; }
-}
-$('find').onsubmit = async e => {
-  e.preventDefault();
-  const q = $('term').value.replace(/[^\p{L}\p{N} ]/gu, ' ').trim();
-  if (!q) return;
-  $('hits').replaceChildren(); $('netInfo').textContent = 'Cerco';
-  try {
-    if ($('src').value === 'ia') {
-      const query = encodeURIComponent(`(${q}) AND mediatype:audio AND format:Flac AND licenseurl:*creativecommons*`);
-      const data = await getJSON(`https://archive.org/advancedsearch.php?q=${query}&fl[]=identifier&fl[]=title&fl[]=creator&fl[]=licenseurl&rows=20&output=json`);
-      const docs = data.response.docs;
-      $('netInfo').textContent = docs.length ? 'Raccolte trovate' : 'Nessun risultato';
-      docs.forEach(d => hit(d.title || d.identifier, button('Apri', () => openItem(d)), d.licenseurl));
-    } else {
-      let key = '';
-      try { key = localStorage.getItem('jamendo') || ''; } catch {}
-      key = key || prompt('Inserisci il client ID gratuito di Jamendo (developer.jamendo.com)')?.trim();
-      if (!key) { $('netInfo').textContent = 'Serve un client ID Jamendo'; return; }
-      const data = await getJSON(`https://api.jamendo.com/v3.0/tracks/?client_id=${encodeURIComponent(key)}&format=json&limit=30&audiodlformat=flac&search=${encodeURIComponent(q)}`);
-      if (data.headers.status !== 'success') throw 0;
-      try { localStorage.setItem('jamendo', key); } catch {}
-      const found = data.results.filter(r => r.audiodownload_allowed && r.audiodownload);
-      $('netInfo').textContent = found.length ? 'Brani scaricabili' : 'Nessun risultato';
-      found.forEach(r => hit(`${r.artist_name}: ${r.name}`, getButton(r.audiodownload, r.artist_name, r.name, r.shareurl), r.license_ccurl));
-    }
-  } catch { $('netInfo').textContent = 'Ricerca non riuscita. Controlla connessione e client ID.'; }
-};
-$('netClose').onclick = () => $('net').close();
-
 // Ripresa dell'ascolto
 let savedAt = 0;
 function remember() {
@@ -723,6 +661,7 @@ audio.addEventListener('timeupdate', () => {
 document.addEventListener('visibilitychange', remember);
 
 navigator.serviceWorker?.register('sw.js');
+showNow();
 init().then(restore).catch(() => $('info').textContent = 'Impossibile aprire la libreria. Disattiva la navigazione privata e riprova.');
 </script>
 </body>
