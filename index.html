@@ -123,6 +123,14 @@ h2{font-size:22px;margin:26px 0 12px}
 #menu button.opt{display:flex;gap:14px;align-items:center;border:0}
 .ico{width:48px;height:48px;flex:none;display:grid;place-items:center;border-radius:50%;background:var(--soft);font-size:22px}
 #menu .opt small{white-space:normal}
+#list li,.row2{content-visibility:auto;contain-intrinsic-size:auto 72px}
+#list li.end{height:1px}
+body.selecting #tools{position:sticky;top:env(safe-area-inset-top);z-index:4;background:var(--bg);padding:8px 0}
+body.selecting nav{position:static}
+body.selecting[data-page=library] #q{display:block}
+#menu[open],#full[open]{animation:rise .25s ease-out}
+@keyframes rise{from{opacity:0;transform:translateY(32px)}}
+@media(prefers-reduced-motion:reduce){#menu[open],#full[open]{animation:none}}
 </style>
 </head>
 <body>
@@ -204,7 +212,11 @@ const smart = {
   top: ['Più ascoltati', () => tracks.filter(t => t.plays).sort((a, b) => b.plays - a.plays).slice(0, 30)],
   mix: ['Mix casuale', () => mix.map(byId).filter(Boolean)]
 };
-const byId = id => tracks.find(t => t.id === id);
+let index = new Map(), indexed = null;
+const byId = id => {
+  if (indexed !== tracks || index.size !== tracks.length) { index = new Map(tracks.map(t => [t.id, t])); indexed = tracks; }
+  return index.get(id);
+};
 const listOf = () => lists.find(l => l.id === view);
 const visible = () => {
   const q = $('q').value.toLowerCase(), l = listOf();
@@ -228,6 +240,7 @@ async function create(ids = [], suggested = '') {
   lists.push(l); view = l.id; await save(l);
 }
 function renderTabs() {
+  document.body.classList.toggle('selecting', !!selected);
   favIcon();
   const chips = [], tools = [], l = listOf(), detail = view !== 'all';
   if (detail) {
@@ -243,9 +256,10 @@ function renderTabs() {
   if (selected) {
     const ids = () => [...selected];
     tools.push(button('Tutti', () => { visible().forEach(t => selected.add(t.id)); render(); }),
+      button('Nessuno', () => { selected.clear(); render(); }),
       button(`Aggiungi (${selected.size})`, () => addMany(ids())),
       ...(l ? [button('Togli', () => { l.ids = l.ids.filter(i => !selected.has(i)); selected = null; save(l); })] : []),
-      button('Elimina', () => removeMany(ids())),
+      button(`Elimina (${selected.size})`, () => removeMany(ids())),
       button('Annulla', () => { selected = null; render(); }));
   } else if (songs) {
     if (visible().length) {
@@ -314,31 +328,61 @@ async function load() {
   tracks.sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
   const mb = tracks.reduce((s, t) => s + t.size, 0) / 1e6;
   $('info').textContent = tracks.length
-    ? `Brani: ${tracks.length}, spazio usato: ${mb.toFixed(0)} MB, versione 16`
+    ? `Brani: ${tracks.length}, spazio usato: ${mb.toFixed(0)} MB, versione 17`
     : 'La libreria è vuota. Importa i brani dall’app File.';
   render();
   enrich();
 }
 
+let limit = 60, shown = '', watcher = null;
+function row(t, all) {
+  const li = document.createElement('li');
+  li.className = t.id === current?.id ? 'on' : '';
+  li.innerHTML = '<button class="song"><span class="cover"></span><span class="txt"><b></b><small></small></span></button><button class="del" aria-label="Opzioni">⋯</button>';
+  paint(li.querySelector('.cover'), t);
+  li.querySelector('b').textContent = t.title;
+  li.querySelector('small').textContent = pending(t) ? `Da sincronizzare • ${t.artist}` : t.artist;
+  const song = li.querySelector('.song'), del = li.querySelector('.del');
+  song.onclick = () => { context = all.map(x => x.id); start(t); };
+  del.onclick = () => menu(t);
+  if (selected) {
+    const mark = () => { del.textContent = selected.has(t.id) ? '✓' : '○'; del.setAttribute('aria-pressed', selected.has(t.id)); };
+    del.setAttribute('aria-label', 'Seleziona');
+    // Aggiorna solo la riga toccata, senza ricostruire l'elenco
+    song.onclick = del.onclick = () => { selected.delete(t.id) || selected.add(t.id); mark(); renderTabs(); };
+    mark();
+  }
+  return li;
+}
 function rows() {
-  $('list').replaceChildren(...visible().map(t => {
-    const li = document.createElement('li');
-    li.className = t.id === current?.id ? 'on' : '';
-    li.innerHTML = '<button class="song"><span class="cover"></span><span class="txt"><b></b><small></small></span></button><button class="del" aria-label="Opzioni">⋯</button>';
-    paint(li.querySelector('.cover'), t);
-    li.querySelector('b').textContent = t.title;
-    li.querySelector('small').textContent = pending(t) ? `Da sincronizzare • ${t.artist}` : t.artist;
-    li.querySelector('.song').onclick = () => { context = visible().map(x => x.id); start(t); };
-    li.querySelector('.del').onclick = () => menu(t);
-    if (selected) {
-      const flip = () => { selected.delete(t.id) || selected.add(t.id); render(); };
-      li.querySelector('.song').onclick = li.querySelector('.del').onclick = flip;
-      li.querySelector('.del').textContent = selected.has(t.id) ? '✓' : '○';
-      li.querySelector('.del').setAttribute('aria-label', 'Seleziona');
-    }
-    return li;
-  }));
-  headers();
+  const all = visible(), k = $('sort').value, heads = page === 'library' && view === 'all' && grouped(k);
+  const key = [page, view, chip, filter, $('q').value, k].join('|');
+  if (key !== shown) { shown = key; limit = 60; }
+  watcher?.disconnect();
+  const end = el('li', 'end');
+  $('list').replaceChildren(end);
+  let count = 0, before = null;
+  const add = () => {
+    const batch = document.createDocumentFragment();
+    all.slice(count, limit).forEach(t => {
+      const group = heads && (pending(t) ? WAIT : groupKey(t, k));
+      if (heads && group !== before) {
+        before = group;
+        batch.append(el('li', 'head', pending(t) ? WAIT : labelOf(t, k) ? labelOf(t, k) + (k === 'album' ? `, ${mainArtist(t.artist)}` : '') : 'Non classificati'));
+      }
+      batch.append(row(t, all));
+    });
+    end.before(batch);
+    count = Math.min(limit, all.length);
+  };
+  add();
+  if (count >= all.length) return end.remove();
+  watcher = new IntersectionObserver(([entry]) => {
+    if (!entry.isIntersecting) return;
+    limit += 60; add(); watcher.unobserve(end);
+    if (count >= all.length) end.remove(); else watcher.observe(end);
+  }, { rootMargin: '800px' });
+  watcher.observe(end);
 }
 
 async function importFiles(input, asList) {
@@ -518,24 +562,24 @@ async function readTags(file) {
 }
 async function shrink(pic) {
   try {
-    const img = await createImageBitmap(pic), k = Math.min(1, 600 / Math.max(img.width, img.height));
+    const img = await createImageBitmap(pic), k = Math.min(1, 240 / Math.max(img.width, img.height));
     const c = document.createElement('canvas');
     c.width = img.width * k; c.height = img.height * k;
     c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-    return c.toDataURL('image/jpeg', .85);
+    return c.toDataURL('image/jpeg', .8);
   } catch { return null; }
 }
 // Rilegge dal file audio le copertine salvate nel vecchio formato
 async function repairCovers() {
   let t;
-  while ((t = tracks.find(x => x.tagged && x.coverV !== 2))) {
+  while ((t = tracks.find(x => x.tagged && x.coverV !== 3))) {
     const id = t.id, file = await wrap(store('files').get(id));
     const pic = file && (await readTags(file)).pic;
     const cover = pic ? await shrink(pic) : '';
     if (!(t = byId(id))) continue;
-    Object.assign(t, { cover: cover || '', coverV: 2 });
+    Object.assign(t, { cover: cover || '', coverV: 3 });
     await wrap(store('tracks', 'readwrite').put(t));
-    render(); showNow();
+    refreshUI();
   }
 }
 async function enrich() {
@@ -553,9 +597,9 @@ async function enrich() {
     if (t.title === parts.join(' - ').trim() && t.artist === artist) { t.title = tags.title || t.title; t.artist = tags.artist || artist; }
     t.album = tags.album || '';
     if (tags.pic) t.cover = await shrink(tags.pic);
-    t.coverV = 2;
+    t.coverV = 3;
     await wrap(store('tracks', 'readwrite').put(t));
-    render(); showNow();
+    refreshUI();
   }
   try { await repairCovers(); } catch {}
   enriching = false;
@@ -580,6 +624,7 @@ function showNow() {
   paint($('art'), t);
   paint($('mini'), t);
   tint(t);
+  largeCover(t);
   favIcon();
   if (t && 'mediaSession' in navigator)
     navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist, album: t.album || '', artwork: [{ src: typeof t.cover === 'string' && t.cover ? t.cover : 'icon.png' }] });
@@ -687,7 +732,12 @@ async function showFormat(t) {
 audio.addEventListener('durationchange', () => showFormat(current));
 
 // Nomi uniformati: gli ospiti e le varie edizioni non creano artisti o album separati
-const norm = x => (x || '').normalize('NFKD').replace(/[\u0300-\u036f\0]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+const normCache = new Map();
+const norm = x => {
+  let v = normCache.get(x);
+  if (v === undefined) normCache.set(x, v = (x || '').normalize('NFKD').replace(/[\u0300-\u036f\0]/g, '').toLowerCase().replace(/\s+/g, ' ').trim());
+  return v;
+};
 const mainArtist = a => (a || '').match(/^(ac\/dc|earth, wind & fire|tyler, the creator)/i)?.[0] ||
   (a || '').split(/\s*(?:\/|;|,|\0|[([]?\bfeat\.?\s|[([]?\bft\.\s|\bfeaturing\s)\s*/i)[0].trim();
 const albumName = a => (a || '').replace(/\s*(?:[([][^)\]]*|- [^-]*)(deluxe|edition|version|remaster|explicit|edited|bonus|expanded)[^)\]]*[)\]]?/gi, '').trim();
@@ -751,6 +801,7 @@ $('make').onclick = () => sheet(
   ['Importa brani', () => { go('library'); $('pick').click(); }, 'Aggiungi file dal telefono', '↓'],
   ['Playlist da file', () => { go('library'); $('pickList').click(); }, 'Importa i brani di una cartella', '▤'],
   ['Mix casuale', () => { go('library'); create(shuffled().slice(0, 25), 'Il mio mix'); }, 'Salva 25 brani mescolati', '⇄'],
+  ['Elimina brani', () => { go('library'); filter = 'songs'; selected = new Set(); render(); }, 'Seleziona più brani insieme', '✕'],
   ['Sincronizza informazioni', async () => {
     for (const t of tracks) { t.checked = ''; await wrap(store('tracks', 'readwrite').put(t)); }
     render(); lookup();
@@ -806,7 +857,7 @@ async function lookup() {
       }
       t.checked = r ? 'ok' : 'no';
       await wrap(store('tracks', 'readwrite').put(t));
-      render(); showNow();
+      refreshUI();
     } catch {
       $('info').textContent = 'Sincronizzazione non riuscita. Nuovo tentativo tra un minuto.';
       break;
@@ -817,7 +868,12 @@ async function lookup() {
 }
 addEventListener('online', lookup);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && db) lookup(); });
-setInterval(() => { if (db) lookup(); }, 60000);
+setInterval(() => { if (db && !document.hidden) lookup(); }, 60000);
+let uiTimer = 0;
+function refreshUI() {
+  uiTimer ||= setTimeout(() => { uiTimer = 0; if (!document.hidden) { render(); showNow(); } }, 1500);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && db) { render(); showNow(); refresh(); } });
 
 function sheet(...items) {
   const d = $('menu');
@@ -883,6 +939,20 @@ $('fav').onclick = () => {
   l.ids = l.ids.includes(id) ? l.ids.filter(i => i !== id) : [...l.ids, id];
   save(l);
 };
+let large = { id: null, url: '' };
+async function largeCover(t) {
+  if (!t) return;
+  if (large.id !== t.id) {
+    if (large.url) URL.revokeObjectURL(large.url);
+    const mine = large = { id: t.id, url: '' };
+    const file = await wrap(store('files').get(t.id)), pic = file && (await readTags(file)).pic;
+    if (large !== mine || !pic) return;
+    mine.url = URL.createObjectURL(pic);
+  }
+  if (!large.url || current?.id !== t.id) return;
+  $('art').style.background = `center/cover url("${large.url}")`; $('art').textContent = '';
+  if (navigator.mediaSession?.metadata) navigator.mediaSession.metadata.artwork = [{ src: large.url }];
+}
 async function tint(t) {
   const foot = document.querySelector('footer');
   try {
@@ -955,7 +1025,17 @@ function libraryPage() {
   all.sort((a, b) => !!b.heart - !!a.heart || (recent ? b.added - a.added : compare(a.name, b.name)));
   return [el('div', grid ? 'grid' : '', ...all.map(c => entry(`row2 ${c.type || ''}`, c)))];
 }
+let lastScreen = '';
+function transition() {
+  const screen = [page, view, filter].join('|');
+  if (screen === lastScreen) return;
+  lastScreen = screen;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  [document.querySelector('header'), $('tabs'), $('page'), $('list')].forEach(e =>
+    e.animate([{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], { duration: 220, easing: 'ease-out' }));
+}
 function render() {
+  transition();
   const detail = view !== 'all', q = $('q').value.trim();
   const songs = detail || (page === 'library' && filter === 'songs') || (page === 'search' && q);
   document.body.dataset.detail = detail;
@@ -1015,6 +1095,7 @@ const playPos = () => base + audio.currentTime;
 const fullTime = () => total || audio.duration;
 const isMp3 = t => /\.mp3$/i.test(t.id.slice(0, -String(t.size).length));
 function refresh() {
+  if (document.hidden) return;
   const p = playPos(), d = fullTime(), part = Math.min(1, p / d || 0);
   if (!dragging) $('seek').value = $('fseek').value = part * 1000;
   $('bar').style.width = part * 100 + '%';
@@ -1048,7 +1129,7 @@ async function jumpTo(seconds, play) {
 $('rep').addEventListener('click', () => { audio.loop = repeat && !base; });
 addEventListener('pagehide', () => remember());
 audio.addEventListener('timeupdate', () => {
-  if (Date.now() - savedAt > 1000) { savedAt = Date.now(); remember(); }
+  if (Date.now() - savedAt > 3000) { savedAt = Date.now(); remember(); }
 });
 ['play', 'pause'].forEach(e => audio.addEventListener(e, () => setTimeout(() => { sync(); remember(); })));
 document.addEventListener('visibilitychange', remember);
