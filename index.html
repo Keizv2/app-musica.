@@ -741,11 +741,11 @@ $('make').onclick = () => sheet(
     for (const t of tracks) { t.checked = ''; await wrap(store('tracks', 'readwrite').put(t)); }
     render(); lookup();
   }, 'Ricontrolla genere e album online', '⟳'],
-  [online() ? 'Disattiva verifica online' : 'Attiva verifica online', () => { try { localStorage.setItem('online', online() ? 'off' : 'on'); } catch {} render(); showNow(); lookup(); }, 'Invio di artista e titolo ad Apple', '◎'],
+  [online() ? 'Disattiva verifica online' : 'Attiva verifica online', () => { try { localStorage.setItem('online', online() ? 'off' : 'on'); } catch {} render(); showNow(); lookup(); }, 'Invio di artista e titolo a Deezer', '◎'],
   ['Esporta backup', exportData, 'Salva playlist e dati', '↑'],
   ['Ripristina backup', () => $('backup').click(), 'Recupera un salvataggio', '↺']);
 
-// Genere e informazioni verificate nel catalogo iTunes
+// Genere e informazioni verificate nel catalogo Deezer
 function jsonp(src) {
   return new Promise((ok, ko) => {
     const name = 'it' + Date.now(), el = document.createElement('script');
@@ -762,32 +762,42 @@ const variant = x => (norm(x).match(/remix|live|acoustic|instrumental|karaoke/g)
 function best(t, results) {
   const artist = norm(mainArtist(t.artist));
   const score = r => (norm(r.trackName) === norm(t.title) ? 4 : 0) + (norm(albumName(r.collectionName)) === keyOf(t, 'album') ? 8 : 0) + (norm(r.artistName).startsWith(artist) ? 2 : 0);
-  return results.filter(r => bare(r.trackName) === bare(t.title) && variant(r.trackName) === variant(t.title) && norm(r.artistName).includes(artist))
+  return results.filter(r => bare(r.trackName) === bare(t.title) && variant(r.trackName) === variant(t.title) && (norm(r.artistName).includes(artist) || artist.includes(norm(r.artistName))))
     .sort((a, b) => score(b) - score(a))[0];
 }
 let looking = false;
+async function deezer(path) {
+  const data = await jsonp(`https://api.deezer.com/${path}${path.includes('?') ? '&' : '?'}output=jsonp`);
+  if (data.error) throw data.error;
+  return data;
+}
 async function lookup() {
   if (looking || !online() || !navigator.onLine) return;
   looking = true;
-  let next_;
-  while (online() && (next_ = tracks.find(x => x.tagged && !x.checked))) {
+  let waiting;
+  while (online() && (waiting = tracks.find(x => x.tagged && !x.checked))) {
     try {
-      const term = encodeURIComponent(mainArtist(next_.artist) + ' ' + next_.title.replace(/[([].*?[)\]]/g, ''));
-      const data = await jsonp(`https://itunes.apple.com/search?media=music&entity=song&country=IT&limit=25&term=${term}`);
-      const t = byId(next_.id);
+      const term = encodeURIComponent(mainArtist(waiting.artist) + ' ' + waiting.title.replace(/[([].*?[)\]]/g, '').trim());
+      const found = (await deezer(`search?q=${term}&limit=25`)).data.map(x => ({ trackName: x.title, artistName: x.artist.name, collectionName: x.album.title, id: x.id, albumId: x.album.id }));
+      const r = best(waiting, found);
+      const album = r && await deezer(`album/${r.albumId}`);
+      const song = r && await deezer(`track/${r.id}`);
+      const t = byId(waiting.id);
       if (!t) continue;
-      const r = best(t, data.results);
       if (r) {
-        t.genre = r.primaryGenreName;
-        t.year = r.releaseDate?.slice(0, 4);
+        t.genre = album.genres?.data?.[0]?.name || '';
+        t.year = song.release_date?.slice(0, 4) || album.release_date?.slice(0, 4);
         // L'album del file viene completato o uniformato, mai sostituito con uno diverso
-        if (!t.album || keyOf(t, 'album') === norm(albumName(r.collectionName))) { t.album = r.collectionName; t.track = r.trackNumber; }
+        if (!t.album || keyOf(t, 'album') === norm(albumName(r.collectionName))) { t.album = r.collectionName; t.track = song.track_position; }
       }
       t.checked = r ? 'ok' : 'no';
       await wrap(store('tracks', 'readwrite').put(t));
       render(); showNow();
-    } catch { break; }
-    await new Promise(ok => setTimeout(ok, 3500));
+    } catch {
+      $('info').textContent = 'Sincronizzazione non riuscita. Nuovo tentativo tra un minuto.';
+      break;
+    }
+    await new Promise(ok => setTimeout(ok, 1000));
   }
   looking = false;
 }
