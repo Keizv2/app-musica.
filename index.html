@@ -33,6 +33,13 @@ footer{position:fixed;left:0;right:0;bottom:0;background:var(--card);padding:12p
 .row button{font-size:22px;min-width:56px}
 .row .mode{font-size:14px;color:var(--dim)}
 .row .mode[aria-pressed=true]{color:var(--acc);font-weight:700}
+nav{display:flex;gap:8px;overflow-x:auto;margin-bottom:8px}
+nav button,#tools button{white-space:nowrap;background:var(--card);border-radius:22px;padding:0 16px}
+nav button[aria-pressed=true]{background:var(--acc);color:var(--bg)}
+#tools{display:flex;gap:8px;overflow-x:auto}
+.alt{margin-top:8px;background:var(--card);color:var(--fg)}
+dialog{border:0;border-radius:16px;background:var(--card);color:var(--fg);width:min(90vw,360px);max-height:75vh}
+dialog button{display:block;width:100%;text-align:left}
 </style>
 </head>
 <body>
@@ -41,8 +48,15 @@ footer{position:fixed;left:0;right:0;bottom:0;background:var(--card);padding:12p
 <label class="btn">Importa brani
   <input id="pick" type="file" multiple hidden>
 </label>
+<label class="btn alt">Importa come playlist
+  <input id="pickList" type="file" multiple hidden>
+</label>
 <input id="q" type="search" placeholder="Cerca titolo o artista" aria-label="Cerca">
+<nav id="tabs" aria-label="Playlist"></nav>
+<div id="tools"></div>
 <ul id="list"></ul>
+
+<dialog id="menu"></dialog>
 
 <footer>
   <div class="txt"><b id="now">Nessun brano in riproduzione</b><small id="by">&nbsp;</small></div>
@@ -64,16 +78,77 @@ let db, tracks = [], current = null, url = null, upcoming = null, shuffle = fals
 
 const wrap = r => new Promise((ok, ko) => { r.onsuccess = () => ok(r.result); r.onerror = () => ko(r.error); });
 const store = (name, mode = 'readonly') => db.transaction(name, mode).objectStore(name);
+let lists = [], view = 'all', context = [], queue = [];
+const byId = id => tracks.find(t => t.id === id);
+const listOf = () => lists.find(l => l.id === view);
 const visible = () => {
-  const q = $('q').value.toLowerCase();
-  return tracks.filter(t => (t.title + ' ' + t.artist).toLowerCase().includes(q));
+  const q = $('q').value.toLowerCase(), l = listOf();
+  const base = l ? l.ids.map(byId).filter(Boolean) : tracks;
+  return base.filter(t => (t.title + ' ' + t.artist).toLowerCase().includes(q));
 };
+const button = (label, action, on) => {
+  const b = document.createElement('button');
+  b.textContent = label; b.onclick = action;
+  if (on !== undefined) b.setAttribute('aria-pressed', on);
+  return b;
+};
+async function save(l) {
+  await wrap(store('lists', 'readwrite').put(l));
+  render(); if (current) prepare();
+}
+async function create(ids = [], suggested = '') {
+  const name = prompt('Nome della playlist', suggested)?.trim();
+  if (!name) return;
+  const l = { id: 'p' + Date.now(), name, ids };
+  lists.push(l); view = l.id; await save(l);
+}
+function renderTabs() {
+  const tab = (id, name) => button(name, () => { view = id; render(); }, view === id);
+  $('tabs').replaceChildren(tab('all', 'Tutti i brani'), ...lists.map(l => tab(l.id, l.name)), button('+ Nuova', () => create()));
+  const l = listOf(), tools = [];
+  if (visible().length) tools.push(button('Riproduci', () => { context = visible().map(t => t.id); start(visible()[0]); }));
+  if (l && l.id !== 'fav') tools.push(
+    button('Rinomina', () => { const n = prompt('Nuovo nome', l.name)?.trim(); if (n) { l.name = n; save(l); } }),
+    button('Elimina playlist', async () => {
+      if (!confirm('Eliminare la playlist? I brani restano in libreria.')) return;
+      await wrap(store('lists', 'readwrite').delete(l.id));
+      lists = lists.filter(x => x !== l); view = 'all'; render();
+    }));
+  $('tools').replaceChildren(...tools);
+}
+function menu(t) {
+  const d = $('menu'), l = listOf(), fav = lists[0];
+  const item = (label, action) => button(label, () => { d.close(); action(); });
+  const toggleIn = x => { x.ids = x.ids.includes(t.id) ? x.ids.filter(i => i !== t.id) : [...x.ids, t.id]; save(x); };
+  const move = step => {
+    const i = l.ids.indexOf(t.id), j = i + step;
+    if (j < 0 || j >= l.ids.length) return;
+    [l.ids[i], l.ids[j]] = [l.ids[j], l.ids[i]]; save(l);
+  };
+  const title = document.createElement('b'); title.textContent = t.title;
+  d.replaceChildren(title,
+    item('Riproduci dopo', () => { queue.push(t.id); if (current) prepare(); }),
+    item(fav.ids.includes(t.id) ? 'Togli dai preferiti' : 'Aggiungi ai preferiti', () => toggleIn(fav)),
+    ...lists.slice(1).filter(x => x !== l).map(x => item((x.ids.includes(t.id) ? 'Togli da ' : 'Aggiungi a ') + x.name, () => toggleIn(x))),
+    item('Aggiungi a una nuova playlist', () => create([t.id])),
+    ...(l ? [item('Sposta su', () => move(-1)), item('Sposta giù', () => move(1))] : []),
+    ...(l && l !== fav ? [item('Togli da questa playlist', () => toggleIn(l))] : []),
+    item('Modifica titolo e artista', async () => {
+      const n = prompt('Titolo', t.title)?.trim(), a = n && prompt('Artista', t.artist)?.trim();
+      if (a) { Object.assign(t, { title: n, artist: a }); await wrap(store('tracks', 'readwrite').put(t)); await load(); }
+    }),
+    item('Elimina dalla libreria', () => remove(t)),
+    item('Chiudi', () => {}));
+  d.showModal();
+}
 
 async function init() {
-  const open = indexedDB.open('musica', 1);
+  const open = indexedDB.open('musica', 2);
   open.onupgradeneeded = () => {
-    open.result.createObjectStore('tracks', { keyPath: 'id' });
-    open.result.createObjectStore('files');
+    const d = open.result, has = n => d.objectStoreNames.contains(n);
+    if (!has('tracks')) d.createObjectStore('tracks', { keyPath: 'id' });
+    if (!has('files')) d.createObjectStore('files');
+    if (!has('lists')) d.createObjectStore('lists', { keyPath: 'id' });
   };
   db = await wrap(open);
   navigator.storage?.persist?.();
@@ -82,6 +157,9 @@ async function init() {
 
 async function load() {
   tracks = await wrap(store('tracks').getAll());
+  const saved = await wrap(store('lists').getAll());
+  const fav = saved.find(l => l.id === 'fav') || { id: 'fav', name: 'Preferiti', ids: [] };
+  lists = [fav, ...saved.filter(l => l.id !== 'fav')];
   tracks.sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
   const mb = tracks.reduce((s, t) => s + t.size, 0) / 1e6;
   $('info').textContent = tracks.length
@@ -91,45 +169,59 @@ async function load() {
 }
 
 function render() {
+  renderTabs();
   $('list').replaceChildren(...visible().map(t => {
     const li = document.createElement('li');
     li.className = t.id === current?.id ? 'on' : '';
-    li.innerHTML = '<button class="song"><span class="cover"></span><span class="txt"><b></b><small></small></span></button><button class="del" aria-label="Elimina">✕</button>';
+    li.innerHTML = '<button class="song"><span class="cover"></span><span class="txt"><b></b><small></small></span></button><button class="del" aria-label="Opzioni">⋯</button>';
     const cover = li.querySelector('.cover');
     const hue = [...t.artist + t.title].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 0);
     cover.style.background = `hsl(${hue} 50% 42%)`;
     cover.textContent = t.title[0].toUpperCase();
     li.querySelector('b').textContent = t.title;
     li.querySelector('small').textContent = t.artist;
-    li.querySelector('.song').onclick = () => start(t);
-    li.querySelector('.del').onclick = () => remove(t);
+    li.querySelector('.song').onclick = () => { context = visible().map(x => x.id); start(t); };
+    li.querySelector('.del').onclick = () => menu(t);
     return li;
   }));
 }
 
-$('pick').onchange = async e => {
-  let failed = 0;
-  for (const file of e.target.files) {
+async function importFiles(input, asList) {
+  const all = [...input.files].sort((a, b) => a.name.localeCompare(b.name, 'it', { numeric: true }));
+  input.value = '';
+  let failed = 0, ids = [], m3u = null;
+  for (const file of all) {
+    if (/\.m3u8?$/i.test(file.name)) { m3u = file; continue; }
     if (!/\.(flac|m4a|mp3|wav|aac|aiff?)$/i.test(file.name)) { failed++; continue; }
+    const id = file.name + file.size;
+    if (byId(id)) { ids.push(id); continue; }
     const parts = file.name.replace(/\.[^.]+$/, '').split(' - ');
     const artist = parts.length > 1 ? parts.shift().trim() : 'Artista sconosciuto';
-    const id = file.name + file.size;
     $('info').textContent = 'Importo ' + file.name;
     try {
       const tx = db.transaction(['tracks', 'files'], 'readwrite');
       tx.objectStore('files').put(file, id);
       tx.objectStore('tracks').put({ id, artist, title: parts.join(' - ').trim() || file.name, size: file.size });
       await new Promise((ok, ko) => { tx.oncomplete = ok; tx.onabort = () => ko(tx.error); });
+      ids.push(id);
     } catch { failed++; }
   }
-  e.target.value = '';
   await load();
-  if (failed) $('info').textContent += `. File non importati: ${failed} (formato non valido o spazio insufficiente)`;
-};
+  if (m3u) {
+    const names = (await m3u.text()).split(/\r?\n/).filter(x => x.trim() && !x.startsWith('#')).map(x => x.trim().split(/[\\/]/).pop().normalize());
+    ids = names.map(n => tracks.find(t => t.id.normalize().startsWith(n) && /^\d+$/.test(t.id.normalize().slice(n.length)))?.id).filter(Boolean);
+  }
+  if ((asList || m3u) && ids.length) await create([...new Set(ids)], m3u ? m3u.name.replace(/\.[^.]+$/, '') : '');
+  if (failed) $('info').textContent += `. File non importati: ${failed}`;
+}
+$('pick').onchange = e => importFiles(e.target, false);
+$('pickList').onchange = e => importFiles(e.target, true);
 
 // Il brano successivo viene letto in anticipo, per passare avanti anche a schermo bloccato
 function neighbour(step) {
-  const list = visible().length ? visible() : tracks;
+  if (step > 0 && byId(queue[0])) return byId(queue[0]);
+  const chosen = context.map(byId).filter(Boolean);
+  const list = chosen.length ? chosen : tracks;
   if (!list.length) return null;
   const i = list.findIndex(t => t.id === current?.id);
   if (shuffle && list.length > 1) {
@@ -144,6 +236,7 @@ async function start(t, blob) {
   blob = blob || await wrap(store('files').get(t.id));
   if (url) URL.revokeObjectURL(url);
   current = t; upcoming = null;
+  if (queue[0] === t.id) queue.shift();
   audio.src = url = URL.createObjectURL(blob);
   audio.play().catch(() => {});
   $('now').textContent = t.title;
@@ -161,7 +254,7 @@ async function prepare() {
 
 const next = () => upcoming ? start(upcoming.t, upcoming.blob) : start(neighbour(1));
 const prev = () => audio.currentTime > 3 ? audio.currentTime = 0 : start(neighbour(-1));
-const toggle = () => !current ? start(visible()[0]) : audio.paused ? audio.play() : audio.pause();
+const toggle = () => !current ? (context = visible().map(t => t.id), start(visible()[0])) : audio.paused ? audio.play() : audio.pause();
 
 async function remove(t) {
   if (!confirm(`Eliminare “${t.title}” dalla libreria?`)) return;
@@ -169,6 +262,8 @@ async function remove(t) {
   tx.objectStore('tracks').delete(t.id);
   tx.objectStore('files').delete(t.id);
   tx.oncomplete = async () => {
+    for (const l of lists) if (l.ids.includes(t.id)) { l.ids = l.ids.filter(i => i !== t.id); await wrap(store('lists', 'readwrite').put(l)); }
+    queue = queue.filter(i => i !== t.id);
     if (current?.id === t.id) {
       audio.pause(); audio.removeAttribute('src'); current = null;
       $('now').textContent = 'Nessun brano in riproduzione'; $('by').textContent = '';
@@ -179,7 +274,7 @@ async function remove(t) {
 }
 
 $('play').onclick = toggle; $('next').onclick = next; $('prev').onclick = prev;
-$('q').oninput = () => { render(); if (current) prepare(); };
+$('q').oninput = render;
 $('shuf').onclick = e => { shuffle = !shuffle; e.target.setAttribute('aria-pressed', shuffle); prepare(); };
 $('rep').onclick = e => { repeat = !repeat; audio.loop = repeat; e.target.setAttribute('aria-pressed', repeat); };
 audio.onplay = () => $('play').textContent = '⏸︎';
