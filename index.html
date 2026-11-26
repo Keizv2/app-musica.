@@ -286,7 +286,7 @@ function render() {
     li.innerHTML = '<button class="song"><span class="cover"></span><span class="txt"><b></b><small></small></span></button><button class="del" aria-label="Opzioni">⋯</button>';
     paint(li.querySelector('.cover'), t);
     li.querySelector('b').textContent = t.title;
-    li.querySelector('small').textContent = t.artist;
+    li.querySelector('small').textContent = pending(t) ? `Da sincronizzare • ${t.artist}` : t.artist;
     li.querySelector('.song').onclick = () => { context = visible().map(x => x.id); start(t); };
     li.querySelector('.del').onclick = () => menu(t);
     if (selected) {
@@ -521,7 +521,7 @@ function showNow() {
   const t = current && (byId(current.id) || current);
   $('now').textContent = $('ftitle').textContent = t ? t.title : 'Nessun brano in riproduzione';
   $('by').textContent = t ? t.artist : '';
-  $('fby').textContent = t ? [t.artist, t.album, t.genre, t.year].filter(Boolean).join(', ') : '';
+  $('fby').textContent = t ? (pending(t) ? [t.artist, WAIT] : [t.artist, t.album, t.genre, t.year]).filter(Boolean).join(', ') : '';
   paint($('art'), t);
   paint($('mini'), t);
   tint(t);
@@ -640,7 +640,11 @@ const labelOf = (t, k) => k === 'artist' ? mainArtist(t.artist) : k === 'album' 
 const keyOf = (t, k) => norm(labelOf(t, k));
 const groupKey = (t, k) => k === 'album' ? keyOf(t, 'album') + '|' + keyOf(t, 'artist') : keyOf(t, k);
 const compare = (a, b) => a.localeCompare(b, 'it', { numeric: true });
+const WAIT = 'In attesa di sincronizzazione';
+const pending = t => online() && !t.checked;
+const grouped = k => ['artist', 'album', 'genre'].includes(k);
 const sorted = (a, k = $('sort').value) => [...a].sort((x, y) => {
+  if (grouped(k) && (pending(x) || pending(y))) return pending(x) - pending(y) || compare(x.title, y.title);
   if (k === 'added') return (y.added || 0) - (x.added || 0);
   if (k === 'title') return compare(x.title, y.title);
   return compare(groupKey(x, k), groupKey(y, k)) || compare(keyOf(x, 'album'), keyOf(y, 'album')) ||
@@ -649,7 +653,7 @@ const sorted = (a, k = $('sort').value) => [...a].sort((x, y) => {
 let groupName = '', page = 'library';
 const group = () => {
   const [, key, ...id] = view.split(':');
-  const found = tracks.filter(t => t[key] && groupKey(t, key) === id.join(':'));
+  const found = tracks.filter(t => !pending(t) && t[key] && groupKey(t, key) === id.join(':'));
   return key === 'album' ? sorted(found, 'album') : sorted(found);
 };
 function headers() {
@@ -658,18 +662,18 @@ function headers() {
   const rows = [...$('list').children];
   let before = null;
   visible().forEach((t, i) => {
-    const key = groupKey(t, k);
+    const key = pending(t) ? WAIT : groupKey(t, k);
     if (key === before) return;
     before = key;
     const h = document.createElement('li');
     h.className = 'head';
-    h.textContent = labelOf(t, k) ? labelOf(t, k) + (k === 'album' ? `, ${mainArtist(t.artist)}` : '') : 'Non classificati';
+    h.textContent = pending(t) ? WAIT : labelOf(t, k) ? labelOf(t, k) + (k === 'album' ? `, ${mainArtist(t.artist)}` : '') : 'Non classificati';
     rows[i].before(h);
   });
 }
 function browse(key) {
   const found = new Map();
-  tracks.filter(t => t[key]).forEach(t => found.set(groupKey(t, key), labelOf(t, key) + (key === 'album' ? ` (${mainArtist(t.artist)})` : '')));
+  tracks.filter(t => !pending(t) && t[key]).forEach(t => found.set(groupKey(t, key), labelOf(t, key) + (key === 'album' ? ` (${mainArtist(t.artist)})` : '')));
   if (!found.size) return sheet(['Nessun dato disponibile', () => {}]);
   sheet(...[...found].sort((a, b) => compare(a[1], b[1])).map(([id, name]) => [name, () => { view = `g:${key}:${id}`; groupName = name; selected = null; render(); }]));
 }
@@ -696,7 +700,7 @@ $('make').onclick = () => sheet(
     for (const t of tracks) { t.checked = ''; await wrap(store('tracks', 'readwrite').put(t)); }
     lookup();
   }],
-  [online() ? 'Disattiva verifica online' : 'Attiva verifica online', () => { try { localStorage.setItem('online', online() ? 'off' : 'on'); } catch {} lookup(); }],
+  [online() ? 'Disattiva verifica online' : 'Attiva verifica online', () => { try { localStorage.setItem('online', online() ? 'off' : 'on'); } catch {} render(); showNow(); lookup(); }],
   ['Esporta backup', exportData], ['Ripristina backup', () => $('backup').click()]);
 
 // Genere e informazioni verificate nel catalogo iTunes
@@ -746,6 +750,8 @@ async function lookup() {
   looking = false;
 }
 addEventListener('online', lookup);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && db) lookup(); });
+setInterval(() => { if (db) lookup(); }, 60000);
 
 function sheet(...items) {
   const d = $('menu');
