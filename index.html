@@ -390,7 +390,7 @@ async function start(t, blob, at) {
   if (!t) return;
   blob = blob || await wrap(store('files').get(t.id));
   if (url) URL.revokeObjectURL(url);
-  current = t; upcoming = null; resumeAt = at ?? null;
+  current = t; upcoming = null; resumeAt = at ?? null; resumed = null;
   if (queue[0] === t.id) queue.shift();
   audio.src = url = URL.createObjectURL(blob);
   if (at === undefined) {
@@ -865,7 +865,16 @@ let stopAt = 0;
 $('sleep').onchange = e => { stopAt = e.target.value > 0 ? Date.now() + e.target.value * 60000 : 0; };
 const endSleep = () => { stopAt = 0; $('sleep').value = '0'; audio.pause(); };
 audio.addEventListener('timeupdate', () => { if (stopAt && Date.now() >= stopAt) endSleep(); });
-audio.onended = () => $('sleep').value === 'end' ? endSleep() : next();
+audio.onended = () => {
+  // Una "fine brano" subito dopo la ripresa è falsa: si resta sullo stesso brano
+  if (resumed && Date.now() < resumed.until) {
+    resumeAt = ++falseEnds < 2 ? resumed.at : null;
+    resumed = null; tries = waited = 0;
+    audio.currentTime = 0; audio.play().catch(() => {});
+    return;
+  }
+  $('sleep').value === 'end' ? endSleep() : next();
+};
 
 // Mini player: preferiti, avanzamento e colore preso dalla copertina
 function favIcon() {
@@ -1003,7 +1012,7 @@ async function restore() {
   const ext = t.id.slice(0, -String(t.size).length).split('.').pop().toLowerCase();
   const type = { flac: 'audio/flac', mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', aac: 'audio/aac' }[ext] || 'audio/aiff';
   context = last.context || []; queue = last.queue || [];
-  current = t; resumeAt = last.time > 0 ? last.time : null; tries = waited = 0;
+  current = t; resumeAt = last.time > 0 ? last.time : null; tries = waited = falseEnds = 0; resumed = null;
   audio.src = url = URL.createObjectURL(new Blob([data], { type }));
   render(); showNow(); prepare();
   // Mostra subito il punto salvato, anche prima di premere play
@@ -1013,16 +1022,17 @@ async function restore() {
   $('t0').textContent = clock(last.time); $('t1').textContent = clock(last.duration);
 }
 // Su iPhone il salto va fatto solo quando l'audio sta già suonando, senza ripeterlo di continuo
-let tries = 0, waited = 0, lastTry = 0;
+let tries = 0, waited = 0, lastTry = 0, resumed = null, falseEnds = 0;
 function applyResume() {
   if (resumeAt === null || audio.paused || audio.seeking || !(audio.currentTime > 0)) return;
-  const target = Math.max(0, Math.min(resumeAt, audio.duration - 1));
   // Dopo alcuni tentativi si rinuncia, così la barra torna sempre utilizzabile
-  if (!isFinite(target) || Math.abs(audio.currentTime - target) < 3 || tries >= 4 || ++waited > 30) { resumeAt = null; return; }
+  if (Math.abs(audio.currentTime - resumeAt) < 3 || tries >= 4 || ++waited > 30) { resumeAt = null; return; }
   const ranges = audio.seekable;
-  if (!ranges.length || ranges.end(ranges.length - 1) < target || Date.now() - lastTry < 800) return;
+  // Si salta solo se la durata già nota comprende il punto salvato, mai forzando verso la fine
+  if (!(audio.duration > resumeAt + 1) || !ranges.length || ranges.end(ranges.length - 1) < resumeAt || Date.now() - lastTry < 800) return;
   lastTry = Date.now(); tries++;
-  audio.currentTime = target;
+  resumed = { at: resumeAt, until: Date.now() + 4000 };
+  audio.currentTime = resumeAt;
 }
 audio.addEventListener('timeupdate', applyResume);
 audio.addEventListener('play', () => {
@@ -1031,7 +1041,7 @@ audio.addEventListener('play', () => {
   setTimeout(() => { audio.muted = false; }, 8000);
 });
 audio.addEventListener('timeupdate', () => { if (audio.muted && resumeAt === null) audio.muted = false; });
-['seek', 'fseek'].forEach(id => $(id).addEventListener('input', () => { resumeAt = null; }));
+['seek', 'fseek'].forEach(id => $(id).addEventListener('input', () => { resumeAt = resumed = null; }));
 addEventListener('pagehide', () => remember());
 audio.addEventListener('timeupdate', () => {
   $('fseek').value = $('seek').value; $('t0').textContent = clock(audio.currentTime); $('t1').textContent = clock(audio.duration);
