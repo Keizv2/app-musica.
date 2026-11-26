@@ -12,7 +12,7 @@
 :root{--bg:#f6f5fb;--fg:#1d1736;--dim:#6a6485;--card:#fff;--acc:#5b3df5;color-scheme:light dark}
 @media(prefers-color-scheme:dark){:root{--bg:#17122b;--fg:#f1eefc;--dim:#a9a2c8;--card:#241d42;--acc:#a592ff}}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px ui-rounded,-apple-system,system-ui,sans-serif;padding:env(safe-area-inset-top) 16px calc(190px + env(safe-area-inset-bottom))}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px ui-rounded,-apple-system,system-ui,sans-serif;padding:env(safe-area-inset-top) 16px calc(215px + env(safe-area-inset-bottom))}
 h1{font-size:34px;margin:20px 0 4px}
 p{color:var(--dim);margin:4px 0 16px}
 button,.btn{font:inherit;border:0;background:none;color:inherit;min-height:44px;cursor:pointer}
@@ -41,12 +41,16 @@ nav button[aria-pressed=true]{background:var(--acc);color:var(--bg)}
 dialog{border:0;border-radius:16px;background:var(--card);color:var(--fg);width:min(90vw,360px);max-height:75vh}
 dialog button{display:block;width:100%;text-align:left}
 #full{width:100%;max-width:100%;height:100%;max-height:100%;margin:0;border-radius:0;background:var(--bg);text-align:center;padding:calc(8px + env(safe-area-inset-top)) 20px calc(20px + env(safe-area-inset-bottom))}
+#fq{margin:6px 0;font-weight:700}
 #full>b,#full>small{display:block}
 #art{width:min(100%,40vh);height:auto;aspect-ratio:1;margin:8px auto 16px;font-size:80px}
 #fseek{width:100%;accent-color:var(--acc)}
 #full .row button{width:auto;text-align:center}
 #qlist li{text-align:left}#qlist span{flex:1}#full #qlist button{width:auto}
 footer .txt{cursor:pointer}
+select,#net input{width:100%;font:inherit;padding:10px;margin:0 0 8px;border:0;border-radius:12px;background:var(--card);color:var(--fg)}
+#net{width:100%;max-width:100%;height:100%;max-height:100%;background:var(--bg);padding-top:calc(8px + env(safe-area-inset-top))}
+a{color:var(--acc)}#hits li{justify-content:space-between;gap:8px}#hits button{width:auto}
 </style>
 </head>
 <body>
@@ -59,6 +63,10 @@ footer .txt{cursor:pointer}
   <input id="pickList" type="file" multiple hidden>
 </label>
 <input id="q" type="search" placeholder="Cerca titolo o artista" aria-label="Cerca">
+<select id="sort" aria-label="Ordina per">
+  <option value="artist">Ordina per artista</option><option value="title">Ordina per titolo</option>
+  <option value="album">Ordina per album</option><option value="added">Aggiunti di recente</option>
+</select>
 <nav id="tabs" aria-label="Playlist"></nav>
 <div id="tools"></div>
 <ul id="list"></ul>
@@ -68,16 +76,29 @@ footer .txt{cursor:pointer}
 <dialog id="full">
   <button id="close">Chiudi</button>
   <div id="art" class="cover"></div>
-  <b id="ftitle"></b><small id="fby"></small>
+  <b id="ftitle"></b><small id="fby"></small><small id="fq"></small>
   <input id="fseek" type="range" min="0" max="1000" value="0" aria-label="Posizione">
   <div class="row"><small id="t0">0:00</small><small id="t1">0:00</small></div>
   <div class="row"><button data-for="prev" aria-label="Precedente"></button><button data-for="play" aria-label="Riproduci o pausa"></button><button data-for="next" aria-label="Successivo"></button></div>
   <div class="row"><button class="mode" data-for="shuf"></button><button class="mode" data-for="rep"></button></div>
+  <select id="sleep" aria-label="Timer di spegnimento">
+    <option value="0">Timer spento</option><option value="15">Ferma tra 15 minuti</option><option value="30">Ferma tra 30 minuti</option>
+    <option value="60">Ferma tra 60 minuti</option><option value="end">Ferma a fine brano</option>
+  </select>
   <p>In coda</p><ul id="qlist"></ul>
 </dialog>
 
+<dialog id="net">
+  <button id="netClose">Chiudi</button>
+  <select id="src" aria-label="Fonte"><option value="ia">Internet Archive</option><option value="jam">Jamendo</option></select>
+  <form id="find"><input id="term" type="search" placeholder="Cerca e premi invio" aria-label="Cerca online" required></form>
+  <p id="netInfo" role="status">Solo brani con licenza dichiarata. Controlla le condizioni prima di scaricare.</p>
+  <ul id="hits"></ul>
+</dialog>
+<input id="backup" type="file" hidden>
+
 <footer>
-  <div class="txt"><b id="now">Nessun brano in riproduzione</b><small id="by">&nbsp;</small></div>
+  <div class="txt"><b id="now">Nessun brano in riproduzione</b><small id="by">&nbsp;</small><small id="fmt"></small></div>
   <input id="seek" type="range" min="0" max="1000" value="0" aria-label="Posizione">
   <div class="row">
     <button class="mode" id="shuf" aria-pressed="false">Casuale</button>
@@ -107,7 +128,7 @@ const byId = id => tracks.find(t => t.id === id);
 const listOf = () => lists.find(l => l.id === view);
 const visible = () => {
   const q = $('q').value.toLowerCase(), l = listOf();
-  const base = smart[view] ? smart[view][1]() : l ? l.ids.map(byId).filter(Boolean) : tracks;
+  const base = view.startsWith('g:') ? group() : view === 'all' ? sorted(tracks) : smart[view] ? smart[view][1]() : l ? l.ids.map(byId).filter(Boolean) : tracks;
   return base.filter(t => (t.title + ' ' + t.artist).toLowerCase().includes(q));
 };
 const button = (label, action, on) => {
@@ -131,7 +152,8 @@ function renderTabs() {
     if (id === 'mix') mix = tracks.map(t => [Math.random(), t.id]).sort((a, b) => a[0] - b[0]).slice(0, 25).map(x => x[1]);
     view = id; selected = null; render();
   }, view === id);
-  $('tabs').replaceChildren(tab('all', 'Tutti i brani'), ...Object.entries(smart).map(([id, [n]]) => tab(id, n)), ...lists.map(l => tab(l.id, l.name)), button('+ Nuova', () => create()));
+  $('tabs').replaceChildren(tab('all', 'Tutti i brani'), ...Object.entries(smart).map(([id, [n]]) => tab(id, n)), ...lists.map(l => tab(l.id, l.name)), button('+ Nuova', () => create()), button('Album', () => browse('album')), button('Artisti', () => browse('artist')), button('Altro', more));
+  if (view.startsWith('g:')) $('tabs').prepend(button(view.slice(view.indexOf(':', 2) + 1), () => {}, true));
   const l = listOf(), tools = [];
   if (visible().length) tools.push(button('Riproduci', () => { context = visible().map(t => t.id); start(visible()[0]); }));
   if (l && l.id !== 'fav') tools.push(
@@ -174,6 +196,7 @@ function menu(t) {
       const n = prompt('Titolo', t.title)?.trim(), a = n && prompt('Artista', t.artist)?.trim();
       if (a) { Object.assign(t, { title: n, artist: a }); await wrap(store('tracks', 'readwrite').put(t)); await load(); }
     }),
+    ...(t.source ? [item('Fonte e licenza', () => open(t.source))] : []),
     item('Elimina dalla libreria', () => remove(t)),
     item('Chiudi', () => {}));
   d.showModal();
@@ -242,7 +265,7 @@ async function importFiles(input, asList) {
     try {
       const tx = db.transaction(['tracks', 'files'], 'readwrite');
       tx.objectStore('files').put(file, id);
-      tx.objectStore('tracks').put({ id, artist, title: parts.join(' - ').trim() || file.name, size: file.size });
+      tx.objectStore('tracks').put({ id, added: Date.now(), artist, title: parts.join(' - ').trim() || file.name, size: file.size });
       await new Promise((ok, ko) => { tx.oncomplete = ok; tx.onabort = () => ko(tx.error); });
       ids.push(id);
     } catch { failed++; }
@@ -460,6 +483,7 @@ function showNow() {
       button('✕', change(() => queue.splice(i, 1))));
     return li;
   }));
+  showFormat(t);
   sync();
 }
 function sync() {
@@ -474,6 +498,208 @@ document.querySelector('footer .txt').onclick = () => { showNow(); $('full').sho
 $('close').onclick = () => $('full').close();
 $('fseek').oninput = $('seek').oninput;
 const clock = s => isFinite(s) ? `${s / 60 | 0}:${String(s % 60 | 0).padStart(2, '0')}` : '0:00';
+
+// Formato del file in riproduzione, letto dalle intestazioni
+async function formatOf(file) {
+  const h = await bytes(file, 0, 12), tag = (b, i = 0) => text(b.slice(i, i + 4), 'windows-1252');
+  const pcm = (codec, rate, bits, ch, lossless = true) => ({ codec, rate, bits, ch, lossless });
+  if (tag(h) === 'fLaC') {
+    const b = await bytes(file, 8, 18);
+    return pcm('FLAC', b[10] << 12 | b[11] << 4 | b[12] >> 4, ((b[12] & 1) << 4 | b[13] >> 4) + 1, (b[12] >> 1 & 7) + 1);
+  }
+  if (tag(h) === 'RIFF' || tag(h) === 'FORM') {
+    const wav = tag(h) === 'RIFF';
+    for (let p = 12; p + 8 <= file.size;) {
+      const c = await bytes(file, p, 48), v = new DataView(c.buffer);
+      const len = v.getUint32(4, wav);
+      if (wav && tag(c) === 'fmt ') {
+        const type = v.getUint16(8, true), ok = [1, 3, 65534].includes(type);
+        return pcm(ok ? 'WAV PCM' : 'WAV compresso', v.getUint32(12, true), v.getUint16(22, true), v.getUint16(10, true), ok);
+      }
+      if (!wav && tag(c) === 'COMM') {
+        const rate = be(c, 18) * 2 ** (be(c, 16, 2) - 16383 - 31);
+        const ok = tag(h, 8) === 'AIFF' || ['NONE', 'sowt', 'fl32', 'fl64'].includes(tag(c, 26));
+        return pcm(ok ? 'AIFF PCM' : 'AIFF compresso', rate, be(c, 14, 2), be(c, 8, 2), ok);
+      }
+      p += 8 + len + len % 2;
+    }
+  }
+  if (tag(h, 4) === 'ftyp') {
+    const find = async (from, end) => {
+      for (let p = from; p + 8 <= end;) {
+        const c = await bytes(file, p, 16);
+        let len = be(c, 0), off = 8;
+        if (len === 1) { len = be(c, 8, 8); off = 16; }
+        if (!len) len = end - p;
+        if (len < off) break;
+        if (['moov', 'trak', 'mdia', 'minf', 'stbl'].includes(tag(c, 4))) {
+          const r = await find(p + off, p + len);
+          if (r) return r;
+        } else if (tag(c, 4) === 'stsd') {
+          const e = await bytes(file, p + off + 8, 100), type = tag(e, 4);
+          if (type === 'alac') {
+            const k = e.slice(36 + (be(e, 16, 2) === 1 ? 16 : 0));
+            return pcm('ALAC', be(k, 32), k[17], k[21]);
+          }
+          if (type === 'mp4a') return pcm('AAC', be(e, 32, 2), null, be(e, 24, 2), false);
+        }
+        p += len;
+      }
+    };
+    return find(0, file.size);
+  }
+  const start = tag(h).startsWith('ID3') ? 10 + (h[6] << 21 | h[7] << 14 | h[8] << 7 | h[9]) : 0;
+  const b = await bytes(file, start, 4096);
+  for (let i = 0; i + 4 < b.length; i++) {
+    if (b[i] !== 255 || (b[i + 1] & 224) !== 224) continue;
+    const layer = b[i + 1] >> 1 & 3, ver = b[i + 1] >> 3 & 3;
+    if (!layer) {
+      const rate = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000][b[i + 2] >> 2 & 15];
+      return pcm('AAC', rate, null, (b[i + 2] & 1) << 2 | b[i + 3] >> 6, false);
+    }
+    const base = [44100, 48000, 32000][b[i + 2] >> 2 & 3];
+    if (layer === 1 && ver !== 1 && base) return pcm('MP3', base / (ver === 3 ? 1 : ver === 2 ? 2 : 4), null, b[i + 3] >> 6 === 3 ? 1 : 2, false);
+  }
+}
+const formats = new Map();
+async function showFormat(t) {
+  if (!t) { $('fmt').textContent = $('fq').textContent = ''; return; }
+  if (!formats.has(t.id)) formats.set(t.id, wrap(store('files').get(t.id)).then(formatOf).catch(() => null));
+  const f = await formats.get(t.id);
+  if (current?.id !== t.id) return;
+  if (!f) { $('fmt').textContent = $('fq').textContent = 'Formato non rilevato'; return; }
+  const it = n => n.toLocaleString('it-IT');
+  const kbps = audio.duration ? `circa ${it(Math.round(t.size * 8 / audio.duration / 1000))} kbps` : '';
+  const parts = [f.codec, f.bits ? f.bits + ' bit' : '', f.rate ? it(f.rate / 1000) + ' kHz' : ''].filter(Boolean);
+  $('fmt').textContent = [...parts, f.lossless ? 'lossless' : 'lossy'].join(', ');
+  $('fq').textContent = [...parts, f.ch === 1 ? 'mono' : f.ch === 2 ? 'stereo' : f.ch + ' canali', kbps, f.lossless ? 'lossless' : 'lossy'].filter(Boolean).join(', ');
+}
+audio.addEventListener('durationchange', () => showFormat(current));
+
+// Album, artisti e ordinamento
+const sorted = a => {
+  const k = $('sort').value;
+  return [...a].sort((x, y) => k === 'added' ? (y.added || 0) - (x.added || 0) : (x[k] || '').localeCompare(y[k] || '') || x.id.localeCompare(y.id, 'it', { numeric: true }));
+};
+const group = () => {
+  const [, key, ...name] = view.split(':');
+  return sorted(tracks.filter(t => t[key] === name.join(':')));
+};
+function sheet(...items) {
+  const d = $('menu');
+  d.replaceChildren(...items.map(([label, action]) => button(label, () => { d.close(); action(); })), button('Chiudi', () => d.close()));
+  d.showModal();
+}
+function browse(key) {
+  const names = [...new Set(tracks.map(t => t[key]).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  sheet(...names.map(n => [n, () => { view = `g:${key}:${n}`; selected = null; render(); }]));
+}
+$('sort').onchange = () => { render(); };
+
+// Backup di playlist e dati (senza audio)
+function more() {
+  sheet(['Cerca musica online', () => $('net').showModal()], ['Esporta backup', exportData], ['Ripristina backup', () => $('backup').click()]);
+}
+async function exportData() {
+  const data = JSON.stringify({ app: 'musica', lists, tracks: tracks.map(({ cover, tagged, ...t }) => t) });
+  const file = new File([data], 'musica-backup.json', { type: 'application/json' });
+  if (navigator.canShare?.({ files: [file] })) return navigator.share({ files: [file] }).catch(() => {});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file); a.download = file.name; a.click();
+}
+$('backup').onchange = async e => {
+  try {
+    const data = JSON.parse(await e.target.files[0].text());
+    if (data.app !== 'musica') throw 0;
+    for (const saved of data.tracks) {
+      const t = byId(saved.id);
+      if (t) await wrap(store('tracks', 'readwrite').put({ ...t, ...saved }));
+    }
+    for (const l of data.lists) await wrap(store('lists', 'readwrite').put(l));
+    await load();
+    $('info').textContent = 'Backup ripristinato';
+  } catch { $('info').textContent = 'File di backup non valido'; }
+  e.target.value = '';
+};
+
+// Timer di spegnimento
+let stopAt = 0;
+$('sleep').onchange = e => { stopAt = e.target.value > 0 ? Date.now() + e.target.value * 60000 : 0; };
+const endSleep = () => { stopAt = 0; $('sleep').value = '0'; audio.pause(); };
+audio.addEventListener('timeupdate', () => { if (stopAt && Date.now() >= stopAt) endSleep(); });
+audio.onended = () => $('sleep').value === 'end' ? endSleep() : next();
+
+// Ricerca online
+const getJSON = async u => { const r = await fetch(u); if (!r.ok) throw 0; return r.json(); };
+function hit(label, action, link) {
+  const li = document.createElement('li'), name = document.createElement('span');
+  name.textContent = label; li.append(name);
+  if (link) {
+    const a = document.createElement('a');
+    a.href = link; a.target = '_blank'; a.textContent = 'Licenza';
+    li.append(a);
+  }
+  li.append(action); $('hits').append(li);
+}
+async function download(b, url, artist, title, source) {
+  b.disabled = true; b.textContent = 'Scarico';
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw 0;
+    const blob = await r.blob();
+    const clean = x => String(x).replace(/[\\/:]/g, ' ').replace(/ - /g, ' ').trim();
+    const file = new File([blob], `${clean(artist)} - ${clean(title)}.flac`);
+    await importFiles({ files: [file] }, false);
+    const t = byId(file.name + file.size);
+    if (!t) throw 0;
+    t.source = source; await wrap(store('tracks', 'readwrite').put(t));
+    b.textContent = 'Salvato';
+  } catch {
+    b.disabled = false; b.textContent = 'Riprova';
+    $('netInfo').textContent = 'Download non riuscito. Puoi scaricare il file dal sito con Safari e poi importarlo.';
+  }
+}
+const getButton = (...args) => { const b = button('Scarica', () => download(b, ...args)); return b; };
+async function openItem(d) {
+  $('hits').replaceChildren(); $('netInfo').textContent = 'Carico i brani';
+  try {
+    const data = await getJSON('https://archive.org/metadata/' + encodeURIComponent(d.identifier));
+    const files = data.files.filter(f => /\.flac$/i.test(f.name) && f.private !== 'true');
+    $('netInfo').textContent = files.length ? 'File FLAC disponibili' : 'Nessun file FLAC scaricabile';
+    files.forEach(f => {
+      const title = f.title || f.name.split('/').pop().replace(/\.flac$/i, '');
+      const path = f.name.split('/').map(encodeURIComponent).join('/');
+      hit(title, getButton(`https://archive.org/cors/${d.identifier}/${path}`, f.artist || [d.creator].flat()[0] || 'Artista sconosciuto', title, 'https://archive.org/details/' + d.identifier), d.licenseurl);
+    });
+  } catch { $('netInfo').textContent = 'Impossibile caricare. Controlla la connessione.'; }
+}
+$('find').onsubmit = async e => {
+  e.preventDefault();
+  const q = $('term').value.replace(/[^\p{L}\p{N} ]/gu, ' ').trim();
+  if (!q) return;
+  $('hits').replaceChildren(); $('netInfo').textContent = 'Cerco';
+  try {
+    if ($('src').value === 'ia') {
+      const query = encodeURIComponent(`(${q}) AND mediatype:audio AND format:Flac AND licenseurl:*creativecommons*`);
+      const data = await getJSON(`https://archive.org/advancedsearch.php?q=${query}&fl[]=identifier&fl[]=title&fl[]=creator&fl[]=licenseurl&rows=20&output=json`);
+      const docs = data.response.docs;
+      $('netInfo').textContent = docs.length ? 'Raccolte trovate' : 'Nessun risultato';
+      docs.forEach(d => hit(d.title || d.identifier, button('Apri', () => openItem(d)), d.licenseurl));
+    } else {
+      let key = '';
+      try { key = localStorage.getItem('jamendo') || ''; } catch {}
+      key = key || prompt('Inserisci il client ID gratuito di Jamendo (developer.jamendo.com)')?.trim();
+      if (!key) { $('netInfo').textContent = 'Serve un client ID Jamendo'; return; }
+      const data = await getJSON(`https://api.jamendo.com/v3.0/tracks/?client_id=${encodeURIComponent(key)}&format=json&limit=30&audiodlformat=flac&search=${encodeURIComponent(q)}`);
+      if (data.headers.status !== 'success') throw 0;
+      try { localStorage.setItem('jamendo', key); } catch {}
+      const found = data.results.filter(r => r.audiodownload_allowed && r.audiodownload);
+      $('netInfo').textContent = found.length ? 'Brani scaricabili' : 'Nessun risultato';
+      found.forEach(r => hit(`${r.artist_name}: ${r.name}`, getButton(r.audiodownload, r.artist_name, r.name, r.shareurl), r.license_ccurl));
+    }
+  } catch { $('netInfo').textContent = 'Ricerca non riuscita. Controlla connessione e client ID.'; }
+};
+$('netClose').onclick = () => $('net').close();
 
 // Ripresa dell'ascolto
 let savedAt = 0;
