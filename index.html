@@ -134,6 +134,11 @@ body.selecting[data-page=library] #q{display:block}
 #eq label{display:flex;align-items:center;gap:10px;font-size:14px}
 #eq label span{width:96px;flex:none}#eq output{width:44px;text-align:right}
 #eq input{flex:1;min-height:44px}#eq button{width:100%;color:var(--acc);font-weight:600}
+/* Pagine playlist e album: le schede e la fascia in alto si fondono con lo sfondo */
+body[data-detail=true] nav{position:static;background:transparent}
+body[data-detail=true] nav button[aria-pressed=false]{background:#ffffff1a}
+body[data-detail=true]::before{background:var(--head,#3a3366)}
+body[data-detail=true].selecting #tools{top:env(safe-area-inset-top);background:var(--card);border-radius:14px;padding:6px 10px}
 </style>
 </head>
 <body>
@@ -258,7 +263,7 @@ function renderTabs() {
     const keep = chip; chip = '';
     const genres = [...new Set(visible().filter(t => !pending(t) && t.genre).map(t => t.genre))];
     chip = keep;
-    genres.forEach(g => chips.push(button(g, () => { chip = chip === g ? '' : g; render(); }, chip === g)));
+    if (genres.length > 1) genres.forEach(g => chips.push(button(g, () => { chip = chip === g ? '' : g; render(); }, chip === g)));
   } else if (page === 'library') {
     [['list', 'Playlist'], ['album', 'Album'], ['artist', 'Artisti'], ['songs', 'Brani']].forEach(([k, n]) =>
       chips.push(button(n, () => { filter = filter === k ? '' : k; selected = null; render(); }, filter === k)));
@@ -339,7 +344,7 @@ async function load() {
   tracks.sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
   const mb = tracks.reduce((s, t) => s + t.size, 0) / 1e6;
   $('info').textContent = tracks.length
-    ? `Brani: ${tracks.length}, spazio usato: ${mb.toFixed(0)} MB, versione 18`
+    ? `Brani: ${tracks.length}, spazio usato: ${mb.toFixed(0)} MB, versione 19`
     : 'La libreria è vuota. Importa i brani dall’app File.';
   render();
   enrich();
