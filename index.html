@@ -82,6 +82,14 @@ footer .row button,#fav{min-width:44px;width:44px;height:44px;font-size:22px}
 footer #play{background:none;color:#fff;border-radius:0}
 .bar{position:absolute;left:8px;right:8px;bottom:2px;height:2px;border-radius:2px;background:#ffffff33;overflow:hidden}
 .bar i{display:block;height:100%;width:0;background:#fff}
+#dock{position:fixed;z-index:3;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(4,1fr);background:var(--bg);padding:4px 0 env(safe-area-inset-bottom);border-top:1px solid var(--soft)}
+#dock button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;height:56px;font-size:11px;color:var(--dim)}
+#dock button[aria-current=page]{color:var(--fg);font-weight:700}
+#dock svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+footer{bottom:calc(66px + env(safe-area-inset-bottom))}
+body{padding-bottom:calc(160px + env(safe-area-inset-bottom))}
+.actions,body:not([data-page=search]) #q,body:not([data-page=library]) #sort,body:not([data-page=library]) #info{display:none}
+li.head{font-weight:700;font-size:18px;padding-top:18px}
 </style>
 </head>
 <body>
@@ -99,7 +107,7 @@ footer #play{background:none;color:#fff;border-radius:0}
 <input id="q" type="search" placeholder="Cerca titolo o artista" aria-label="Cerca">
 <select id="sort" aria-label="Ordina per">
   <option value="artist">Ordina per artista</option><option value="title">Ordina per titolo</option>
-  <option value="album">Ordina per album</option><option value="added">Aggiunti di recente</option>
+  <option value="album">Ordina per album</option><option value="genre">Ordina per genere</option><option value="added">Aggiunti di recente</option>
 </select>
 </div>
 <nav id="tabs" aria-label="Playlist"></nav>
@@ -124,6 +132,13 @@ footer #play{background:none;color:#fff;border-radius:0}
 </dialog>
 
 <input id="backup" type="file" hidden>
+
+<div id="dock">
+  <button data-go="home"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v10h-6v-6H9v6H3z"/></svg>Home</button>
+  <button data-go="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/></svg>Ricerca</button>
+  <button data-go="library"><svg viewBox="0 0 24 24"><path d="M5 4v16M10 4v16M15 5l5 15"/></svg>Libreria</button>
+  <button id="make"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg>Crea</button>
+</div>
 
 <footer>
   <div class="now"><div id="mini" class="cover"></div><div class="txt"><b id="now">Nessun brano in riproduzione</b><div class="sub"><small id="by"></small><small id="fmt"></small></div></div></div>
@@ -159,7 +174,7 @@ const listOf = () => lists.find(l => l.id === view);
 const visible = () => {
   const q = $('q').value.toLowerCase(), l = listOf();
   const base = view.startsWith('g:') ? group() : view === 'all' ? sorted(tracks) : smart[view] ? smart[view][1]() : l ? l.ids.map(byId).filter(Boolean) : tracks;
-  return base.filter(t => (t.title + ' ' + t.artist).toLowerCase().includes(q));
+  return base.filter(t => norm([t.title, t.artist, t.album, t.genre].join(' ')).includes(norm(q)));
 };
 const button = (label, action, on) => {
   const b = document.createElement('button');
@@ -183,8 +198,11 @@ function renderTabs() {
     if (id === 'mix') mix = tracks.map(t => [Math.random(), t.id]).sort((a, b) => a[0] - b[0]).slice(0, 25).map(x => x[1]);
     view = id; selected = null; render();
   }, view === id);
-  $('tabs').replaceChildren(tab('all', 'Tutti i brani'), ...Object.entries(smart).map(([id, [n]]) => tab(id, n)), ...lists.map(l => tab(l.id, l.name)), button('+ Nuova', () => create()), button('Album', () => browse('album')), button('Artisti', () => browse('artist')), button('Altro', more));
-  if (view.startsWith('g:')) $('tabs').prepend(button(view.slice(view.indexOf(':', 2) + 1), () => {}, true));
+  const smartTabs = Object.entries(smart).map(([id, [n]]) => tab(id, n));
+  const genres = button('Generi', () => browse('genre'));
+  $('tabs').replaceChildren(...(page === 'home' ? smartTabs : page === 'search' ? [genres] :
+    [tab('all', 'Brani'), button('Album', () => browse('album')), button('Artisti', () => browse('artist')), genres, ...lists.map(l => tab(l.id, l.name))]));
+  if (view.startsWith('g:')) $('tabs').prepend(button(groupName, () => {}, true));
   const l = listOf(), tools = [];
   if (visible().length) tools.push(button('Riproduci', () => { context = visible().map(t => t.id); start(visible()[0]); }));
   if (l && l.id !== 'fav') tools.push(
@@ -225,7 +243,7 @@ function menu(t) {
     ...(l && l !== fav ? [item('Togli da questa playlist', () => toggleIn(l))] : []),
     item('Modifica titolo e artista', async () => {
       const n = prompt('Titolo', t.title)?.trim(), a = n && prompt('Artista', t.artist)?.trim();
-      if (a) { Object.assign(t, { title: n, artist: a }); await wrap(store('tracks', 'readwrite').put(t)); await load(); }
+      if (a) { Object.assign(t, { title: n, artist: a, checked: '' }); await wrap(store('tracks', 'readwrite').put(t)); await load(); }
     }),
     ...(t.source ? [item('Fonte e licenza', () => open(t.source))] : []),
     item('Elimina dalla libreria', () => remove(t)),
@@ -279,6 +297,7 @@ function render() {
     }
     return li;
   }));
+  headers();
 }
 
 async function importFiles(input, asList) {
@@ -484,6 +503,7 @@ async function enrich() {
     render(); showNow();
   }
   enriching = false;
+  lookup();
 }
 
 // Player a schermo intero
@@ -501,7 +521,7 @@ function showNow() {
   const t = current && (byId(current.id) || current);
   $('now').textContent = $('ftitle').textContent = t ? t.title : 'Nessun brano in riproduzione';
   $('by').textContent = t ? t.artist : '';
-  $('fby').textContent = t ? [t.artist, t.album].filter(Boolean).join(', ') : '';
+  $('fby').textContent = t ? [t.artist, t.album, t.genre, t.year].filter(Boolean).join(', ') : '';
   paint($('art'), t);
   paint($('mini'), t);
   tint(t);
@@ -611,15 +631,122 @@ async function showFormat(t) {
 }
 audio.addEventListener('durationchange', () => showFormat(current));
 
-// Album, artisti e ordinamento
-const sorted = a => {
-  const k = $('sort').value;
-  return [...a].sort((x, y) => k === 'added' ? (y.added || 0) - (x.added || 0) : (x[k] || '').localeCompare(y[k] || '') || x.id.localeCompare(y.id, 'it', { numeric: true }));
-};
+// Nomi uniformati: gli ospiti e le varie edizioni non creano artisti o album separati
+const norm = x => (x || '').normalize('NFKD').replace(/[\u0300-\u036f\0]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+const mainArtist = a => (a || '').match(/^(ac\/dc|earth, wind & fire|tyler, the creator)/i)?.[0] ||
+  (a || '').split(/\s*(?:\/|;|,|\0|[([]?\bfeat\.?\s|[([]?\bft\.\s|\bfeaturing\s)\s*/i)[0].trim();
+const albumName = a => (a || '').replace(/\s*(?:[([][^)\]]*|- [^-]*)(deluxe|edition|version|remaster|explicit|edited|bonus|expanded)[^)\]]*[)\]]?/gi, '').trim();
+const labelOf = (t, k) => k === 'artist' ? mainArtist(t.artist) : k === 'album' ? albumName(t.album) : t[k] || '';
+const keyOf = (t, k) => norm(labelOf(t, k));
+const groupKey = (t, k) => k === 'album' ? keyOf(t, 'album') + '|' + keyOf(t, 'artist') : keyOf(t, k);
+const compare = (a, b) => a.localeCompare(b, 'it', { numeric: true });
+const sorted = (a, k = $('sort').value) => [...a].sort((x, y) => {
+  if (k === 'added') return (y.added || 0) - (x.added || 0);
+  if (k === 'title') return compare(x.title, y.title);
+  return compare(groupKey(x, k), groupKey(y, k)) || compare(keyOf(x, 'album'), keyOf(y, 'album')) ||
+    (x.track || 999) - (y.track || 999) || compare(x.title, y.title);
+});
+let groupName = '', page = 'library';
 const group = () => {
-  const [, key, ...name] = view.split(':');
-  return sorted(tracks.filter(t => t[key] === name.join(':')));
+  const [, key, ...id] = view.split(':');
+  const found = tracks.filter(t => t[key] && groupKey(t, key) === id.join(':'));
+  return key === 'album' ? sorted(found, 'album') : sorted(found);
 };
+function headers() {
+  const k = $('sort').value;
+  if (page !== 'library' || view !== 'all' || !['artist', 'album', 'genre'].includes(k)) return;
+  const rows = [...$('list').children];
+  let before = null;
+  visible().forEach((t, i) => {
+    const key = groupKey(t, k);
+    if (key === before) return;
+    before = key;
+    const h = document.createElement('li');
+    h.className = 'head';
+    h.textContent = labelOf(t, k) ? labelOf(t, k) + (k === 'album' ? `, ${mainArtist(t.artist)}` : '') : 'Non classificati';
+    rows[i].before(h);
+  });
+}
+function browse(key) {
+  const found = new Map();
+  tracks.filter(t => t[key]).forEach(t => found.set(groupKey(t, key), labelOf(t, key) + (key === 'album' ? ` (${mainArtist(t.artist)})` : '')));
+  if (!found.size) return sheet(['Nessun dato disponibile', () => {}]);
+  sheet(...[...found].sort((a, b) => compare(a[1], b[1])).map(([id, name]) => [name, () => { view = `g:${key}:${id}`; groupName = name; selected = null; render(); }]));
+}
+
+// Barra di navigazione
+function go(to) {
+  page = to; selected = null; $('q').value = '';
+  view = to !== 'home' ? 'all' : tracks.some(t => t.last) ? 'recent' : 'mix';
+  if (view === 'mix') mix = tracks.map(t => t.id).sort(() => Math.random() - .5).slice(0, 25);
+  document.body.dataset.page = to;
+  document.querySelector('h1').textContent = { home: 'Home', search: 'Ricerca', library: 'Libreria' }[to];
+  document.querySelectorAll('[data-go]').forEach(b => b.dataset.go === to ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'));
+  if (db) render();
+  scrollTo(0, 0);
+}
+document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => go(b.dataset.go));
+go('library');
+const online = () => { try { return localStorage.getItem('online') !== 'off'; } catch { return true; } };
+$('make').onclick = () => sheet(
+  ['Importa brani', () => { go('library'); $('pick').click(); }],
+  ['Importa playlist', () => { go('library'); $('pickList').click(); }],
+  ['Nuova playlist', () => { go('library'); create(); }],
+  ['Ricontrolla informazioni online', async () => {
+    for (const t of tracks) { t.checked = ''; await wrap(store('tracks', 'readwrite').put(t)); }
+    lookup();
+  }],
+  [online() ? 'Disattiva verifica online' : 'Attiva verifica online', () => { try { localStorage.setItem('online', online() ? 'off' : 'on'); } catch {} lookup(); }],
+  ['Esporta backup', exportData], ['Ripristina backup', () => $('backup').click()]);
+
+// Genere e informazioni verificate nel catalogo iTunes
+function jsonp(src) {
+  return new Promise((ok, ko) => {
+    const name = 'it' + Date.now(), el = document.createElement('script');
+    const done = () => { clearTimeout(timer); el.remove(); delete window[name]; };
+    const timer = setTimeout(() => { done(); ko(); }, 10000);
+    window[name] = d => { done(); ok(d); };
+    el.onerror = () => { done(); ko(); };
+    el.src = src + '&callback=' + name;
+    document.head.append(el);
+  });
+}
+const bare = x => norm((x || '').replace(/[([].*?[)\]]/g, '').replace(/\s(feat|ft)\.? .*/i, '')).replace(/[^\p{L}\p{N}]/gu, '');
+const variant = x => (norm(x).match(/remix|live|acoustic|instrumental|karaoke/g) || []).join();
+function best(t, results) {
+  const artist = norm(mainArtist(t.artist));
+  const score = r => (norm(r.trackName) === norm(t.title) ? 4 : 0) + (norm(albumName(r.collectionName)) === keyOf(t, 'album') ? 8 : 0) + (norm(r.artistName).startsWith(artist) ? 2 : 0);
+  return results.filter(r => bare(r.trackName) === bare(t.title) && variant(r.trackName) === variant(t.title) && norm(r.artistName).includes(artist))
+    .sort((a, b) => score(b) - score(a))[0];
+}
+let looking = false;
+async function lookup() {
+  if (looking || !online() || !navigator.onLine) return;
+  looking = true;
+  let next_;
+  while (online() && (next_ = tracks.find(x => x.tagged && !x.checked))) {
+    try {
+      const term = encodeURIComponent(mainArtist(next_.artist) + ' ' + next_.title.replace(/[([].*?[)\]]/g, ''));
+      const data = await jsonp(`https://itunes.apple.com/search?media=music&entity=song&country=IT&limit=25&term=${term}`);
+      const t = byId(next_.id);
+      if (!t) continue;
+      const r = best(t, data.results);
+      if (r) {
+        t.genre = r.primaryGenreName;
+        t.year = r.releaseDate?.slice(0, 4);
+        // L'album del file viene completato o uniformato, mai sostituito con uno diverso
+        if (!t.album || keyOf(t, 'album') === norm(albumName(r.collectionName))) { t.album = r.collectionName; t.track = r.trackNumber; }
+      }
+      t.checked = r ? 'ok' : 'no';
+      await wrap(store('tracks', 'readwrite').put(t));
+      render(); showNow();
+    } catch { break; }
+    await new Promise(ok => setTimeout(ok, 3500));
+  }
+  looking = false;
+}
+addEventListener('online', lookup);
+
 function sheet(...items) {
   const d = $('menu');
   d.replaceChildren(...items.map(([label, action]) => button(label, () => { d.close(); action(); })), button('Chiudi', () => d.close()));
