@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Musica">
+<title>Musica</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon.png">
+<style>
+:root{--bg:#f6f5fb;--fg:#1d1736;--dim:#6a6485;--card:#fff;--acc:#5b3df5;color-scheme:light dark}
+@media(prefers-color-scheme:dark){:root{--bg:#17122b;--fg:#f1eefc;--dim:#a9a2c8;--card:#241d42;--acc:#a592ff}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px ui-rounded,-apple-system,system-ui,sans-serif;padding:env(safe-area-inset-top) 16px calc(190px + env(safe-area-inset-bottom))}
+h1{font-size:34px;margin:20px 0 4px}
+p{color:var(--dim);margin:4px 0 16px}
+button,.btn{font:inherit;border:0;background:none;color:inherit;min-height:44px;cursor:pointer}
+.btn{display:block;background:var(--acc);color:var(--bg);border-radius:12px;padding:12px;text-align:center;font-weight:600}
+input[type=search]{width:100%;font:inherit;padding:12px;margin:12px 0;border:0;border-radius:12px;background:var(--card);color:var(--fg)}
+ul{list-style:none;padding:0;margin:0}
+li{display:flex;align-items:center}
+.song{flex:1;min-width:0;display:flex;gap:12px;align-items:center;text-align:left;padding:6px 0}
+.cover{width:48px;height:48px;flex:none;border-radius:8px;display:grid;place-items:center;color:#fff;font-weight:700;font-size:20px}
+.txt{min-width:0}
+.txt b,.txt small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+small{color:var(--dim)}
+li.on b{color:var(--acc)}
+.del{width:44px;color:var(--dim)}
+footer{position:fixed;left:0;right:0;bottom:0;background:var(--card);padding:12px 16px calc(8px + env(safe-area-inset-bottom));box-shadow:0 -4px 20px #0002}
+#seek{width:100%;accent-color:var(--acc)}
+.row{display:flex;justify-content:space-around;align-items:center}
+.row button{font-size:22px;min-width:56px}
+.row .mode{font-size:14px;color:var(--dim)}
+.row .mode[aria-pressed=true]{color:var(--acc);font-weight:700}
+</style>
+</head>
+<body>
+<h1>Musica</h1>
+<p id="info" role="status"></p>
+<label class="btn">Importa brani
+  <input id="pick" type="file" multiple hidden>
+</label>
+<input id="q" type="search" placeholder="Cerca titolo o artista" aria-label="Cerca">
+<ul id="list"></ul>
+
+<footer>
+  <div class="txt"><b id="now">Nessun brano in riproduzione</b><small id="by">&nbsp;</small></div>
+  <input id="seek" type="range" min="0" max="1000" value="0" aria-label="Posizione">
+  <div class="row">
+    <button class="mode" id="shuf" aria-pressed="false">Casuale</button>
+    <button id="prev" aria-label="Precedente">⏮︎</button>
+    <button id="play" aria-label="Riproduci o pausa">▶︎</button>
+    <button id="next" aria-label="Successivo">⏭︎</button>
+    <button class="mode" id="rep" aria-pressed="false">Ripeti</button>
+  </div>
+</footer>
+<audio id="audio" preload="auto"></audio>
+
+<script>
+const $ = id => document.getElementById(id);
+const audio = $('audio');
+let db, tracks = [], current = null, url = null, upcoming = null, shuffle = false, repeat = false;
+
+const wrap = r => new Promise((ok, ko) => { r.onsuccess = () => ok(r.result); r.onerror = () => ko(r.error); });
+const store = (name, mode = 'readonly') => db.transaction(name, mode).objectStore(name);
+const visible = () => {
+  const q = $('q').value.toLowerCase();
+  return tracks.filter(t => (t.title + ' ' + t.artist).toLowerCase().includes(q));
+};
+
+async function init() {
+  const open = indexedDB.open('musica', 1);
+  open.onupgradeneeded = () => {
+    open.result.createObjectStore('tracks', { keyPath: 'id' });
+    open.result.createObjectStore('files');
+  };
+  db = await wrap(open);
+  navigator.storage?.persist?.();
+  await load();
+}
+
+async function load() {
+  tracks = await wrap(store('tracks').getAll());
+  tracks.sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
+  const mb = tracks.reduce((s, t) => s + t.size, 0) / 1e6;
+  $('info').textContent = tracks.length
+    ? `Brani: ${tracks.length}, spazio usato: ${mb.toFixed(0)} MB`
+    : 'La libreria è vuota. Importa i brani dall’app File.';
+  render();
+}
+
+function render() {
+  $('list').replaceChildren(...visible().map(t => {
+    const li = document.createElement('li');
+    li.className = t.id === current?.id ? 'on' : '';
+    li.innerHTML = '<button class="song"><span class="cover"></span><span class="txt"><b></b><small></small></span></button><button class="del" aria-label="Elimina">✕</button>';
+    const cover = li.querySelector('.cover');
+    const hue = [...t.artist + t.title].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 0);
+    cover.style.background = `hsl(${hue} 50% 42%)`;
+    cover.textContent = t.title[0].toUpperCase();
+    li.querySelector('b').textContent = t.title;
+    li.querySelector('small').textContent = t.artist;
+    li.querySelector('.song').onclick = () => start(t);
+    li.querySelector('.del').onclick = () => remove(t);
+    return li;
+  }));
+}
+
+$('pick').onchange = async e => {
+  let failed = 0;
+  for (const file of e.target.files) {
+    if (!/\.(flac|m4a|mp3|wav|aac|aiff?)$/i.test(file.name)) { failed++; continue; }
+    const parts = file.name.replace(/\.[^.]+$/, '').split(' - ');
+    const artist = parts.length > 1 ? parts.shift().trim() : 'Artista sconosciuto';
+    const id = file.name + file.size;
+    $('info').textContent = 'Importo ' + file.name;
+    try {
+      const tx = db.transaction(['tracks', 'files'], 'readwrite');
+      tx.objectStore('files').put(file, id);
+      tx.objectStore('tracks').put({ id, artist, title: parts.join(' - ').trim() || file.name, size: file.size });
+      await new Promise((ok, ko) => { tx.oncomplete = ok; tx.onabort = () => ko(tx.error); });
+    } catch { failed++; }
+  }
+  e.target.value = '';
+  await load();
+  if (failed) $('info').textContent += `. File non importati: ${failed} (formato non valido o spazio insufficiente)`;
+};
+
+// Il brano successivo viene letto in anticipo, per passare avanti anche a schermo bloccato
+function neighbour(step) {
+  const list = visible().length ? visible() : tracks;
+  if (!list.length) return null;
+  const i = list.findIndex(t => t.id === current?.id);
+  if (shuffle && list.length > 1) {
+    const others = list.filter(t => t.id !== current?.id);
+    return others[Math.random() * others.length | 0];
+  }
+  return list[(i + step + list.length) % list.length];
+}
+
+async function start(t, blob) {
+  if (!t) return;
+  blob = blob || await wrap(store('files').get(t.id));
+  if (url) URL.revokeObjectURL(url);
+  current = t; upcoming = null;
+  audio.src = url = URL.createObjectURL(blob);
+  audio.play().catch(() => {});
+  $('now').textContent = t.title;
+  $('by').textContent = t.artist;
+  if ('mediaSession' in navigator)
+    navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist, artwork: [{ src: 'icon.png' }] });
+  render();
+  prepare();
+}
+
+async function prepare() {
+  const t = neighbour(1);
+  if (t) upcoming = { t, blob: await wrap(store('files').get(t.id)) };
+}
+
+const next = () => upcoming ? start(upcoming.t, upcoming.blob) : start(neighbour(1));
+const prev = () => audio.currentTime > 3 ? audio.currentTime = 0 : start(neighbour(-1));
+const toggle = () => !current ? start(visible()[0]) : audio.paused ? audio.play() : audio.pause();
+
+async function remove(t) {
+  if (!confirm(`Eliminare “${t.title}” dalla libreria?`)) return;
+  const tx = db.transaction(['tracks', 'files'], 'readwrite');
+  tx.objectStore('tracks').delete(t.id);
+  tx.objectStore('files').delete(t.id);
+  tx.oncomplete = async () => {
+    if (current?.id === t.id) {
+      audio.pause(); audio.removeAttribute('src'); current = null;
+      $('now').textContent = 'Nessun brano in riproduzione'; $('by').textContent = '';
+    }
+    upcoming = null;
+    await load();
+  };
+}
+
+$('play').onclick = toggle; $('next').onclick = next; $('prev').onclick = prev;
+$('q').oninput = () => { render(); if (current) prepare(); };
+$('shuf').onclick = e => { shuffle = !shuffle; e.target.setAttribute('aria-pressed', shuffle); prepare(); };
+$('rep').onclick = e => { repeat = !repeat; audio.loop = repeat; e.target.setAttribute('aria-pressed', repeat); };
+audio.onplay = () => $('play').textContent = '⏸︎';
+audio.onpause = () => $('play').textContent = '▶︎';
+audio.onended = next;
+audio.ontimeupdate = () => $('seek').value = audio.currentTime / audio.duration * 1000 || 0;
+$('seek').oninput = e => { if (audio.duration) audio.currentTime = e.target.value / 1000 * audio.duration; };
+if ('mediaSession' in navigator) {
+  const m = navigator.mediaSession;
+  m.setActionHandler('play', () => audio.play());
+  m.setActionHandler('pause', () => audio.pause());
+  m.setActionHandler('nexttrack', next);
+  m.setActionHandler('previoustrack', prev);
+}
+navigator.serviceWorker?.register('sw.js');
+init().catch(() => $('info').textContent = 'Impossibile aprire la libreria. Disattiva la navigazione privata e riprova.');
+</script>
+</body>
+</html>
