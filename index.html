@@ -522,8 +522,21 @@ async function shrink(pic) {
     const c = document.createElement('canvas');
     c.width = img.width * k; c.height = img.height * k;
     c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-    return await new Promise(ok => c.toBlob(ok, 'image/jpeg', .85));
+    return c.toDataURL('image/jpeg', .85);
   } catch { return null; }
+}
+// Rilegge dal file audio le copertine salvate nel vecchio formato
+async function repairCovers() {
+  let t;
+  while ((t = tracks.find(x => x.tagged && x.coverV !== 2))) {
+    const id = t.id, file = await wrap(store('files').get(id));
+    const pic = file && (await readTags(file)).pic;
+    const cover = pic ? await shrink(pic) : '';
+    if (!(t = byId(id))) continue;
+    Object.assign(t, { cover: cover || '', coverV: 2 });
+    await wrap(store('tracks', 'readwrite').put(t));
+    render(); showNow();
+  }
 }
 async function enrich() {
   if (enriching) return;
@@ -540,19 +553,20 @@ async function enrich() {
     if (t.title === parts.join(' - ').trim() && t.artist === artist) { t.title = tags.title || t.title; t.artist = tags.artist || artist; }
     t.album = tags.album || '';
     if (tags.pic) t.cover = await shrink(tags.pic);
+    t.coverV = 2;
     await wrap(store('tracks', 'readwrite').put(t));
     render(); showNow();
   }
+  try { await repairCovers(); } catch {}
   enriching = false;
   lookup();
 }
 
 // Player a schermo intero
-const covers = new Map();
+const bitmap = async src => createImageBitmap(await (await fetch(src)).blob());
 function paint(el, t) {
-  if (t?.cover) {
-    if (!covers.has(t.id)) covers.set(t.id, URL.createObjectURL(t.cover));
-    el.style.background = `center/cover url("${covers.get(t.id)}")`; el.textContent = '';
+  if (typeof t?.cover === 'string' && t.cover) {
+    el.style.background = `center/cover url("${t.cover}")`; el.textContent = '';
   } else {
     const hue = [...(t ? t.artist + t.title : '')].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 250);
     el.style.background = `hsl(${hue} 50% 42%)`; el.textContent = t ? t.title[0].toUpperCase() : '♪';
@@ -568,7 +582,7 @@ function showNow() {
   tint(t);
   favIcon();
   if (t && 'mediaSession' in navigator)
-    navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist, album: t.album || '', artwork: [{ src: t.cover ? covers.get(t.id) : 'icon.png' }] });
+    navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist, album: t.album || '', artwork: [{ src: typeof t.cover === 'string' && t.cover ? t.cover : 'icon.png' }] });
   $('qlist').replaceChildren(...queue.map((id, i) => {
     const li = document.createElement('li'), name = document.createElement('span');
     name.textContent = byId(id)?.title || '';
@@ -872,7 +886,7 @@ async function tint(t) {
     if (!t?.cover) throw 0;
     const c = document.createElement('canvas').getContext('2d');
     c.canvas.width = c.canvas.height = 1;
-    c.drawImage(await createImageBitmap(t.cover), 0, 0, 1, 1);
+    c.drawImage(await bitmap(t.cover), 0, 0, 1, 1);
     const rgb = [...c.getImageData(0, 0, 1, 1).data].slice(0, 3).map(v => Math.round(v * .4 + 8));
     if (current?.id === t.id) foot.style.background = `rgb(${rgb})`;
   } catch { foot.style.background = ''; }
@@ -963,7 +977,7 @@ async function headColor(t) {
   try {
     const c = document.createElement('canvas').getContext('2d');
     c.canvas.width = c.canvas.height = 1;
-    c.drawImage(await createImageBitmap(t.cover), 0, 0, 1, 1);
+    c.drawImage(await bitmap(t.cover), 0, 0, 1, 1);
     const rgb = [...c.getImageData(0, 0, 1, 1).data].slice(0, 3).map(v => Math.round(v * .5));
     document.body.style.setProperty('--head', `rgb(${rgb})`);
   } catch { document.body.style.removeProperty('--head'); }
@@ -1011,6 +1025,12 @@ function applyResume() {
   audio.currentTime = target;
 }
 audio.addEventListener('timeupdate', applyResume);
+audio.addEventListener('play', () => {
+  if (resumeAt === null) return;
+  audio.muted = true;
+  setTimeout(() => { audio.muted = false; }, 8000);
+});
+audio.addEventListener('timeupdate', () => { if (audio.muted && resumeAt === null) audio.muted = false; });
 ['seek', 'fseek'].forEach(id => $(id).addEventListener('input', () => { resumeAt = null; }));
 addEventListener('pagehide', () => remember());
 audio.addEventListener('timeupdate', () => {
